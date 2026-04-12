@@ -1,0 +1,617 @@
+"""
+app.py  —  Football Stats Live Web App
+Avvio locale : python app.py
+Cloud        : vedi README_DEPLOY.md
+"""
+
+import os, re, json, time, sqlite3, threading
+from datetime import datetime
+from pathlib import Path
+from flask import Flask, jsonify, request, send_from_directory, Response
+
+try:
+    import requests as req_lib
+    HAS_REQUESTS = True
+except ImportError:
+    import urllib.request, urllib.parse
+    HAS_REQUESTS = False
+
+# ── Config ────────────────────────────────────────────────────────────────────
+API_KEY      = os.environ.get('API_KEY',  'd440bc0c72f6ef65a024d6bb5483e965')
+API_BASE     = 'https://v3.football.api-sports.io'
+DB_PATH      = Path(__file__).parent / 'football.db'
+POLL_SECONDS = int(os.environ.get('POLL_SECONDS', '900'))   # default 15 min
+PORT         = int(os.environ.get('PORT', '5000'))
+
+app = Flask(__name__, template_folder='templates', static_folder='static')
+
+# ── DB helper ─────────────────────────────────────────────────────────────────
+def get_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def query(sql, params=()):
+    conn = get_db()
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def execute(sql, params=()):
+    conn = get_db()
+    conn.execute(sql, params)
+    conn.commit()
+    conn.close()
+
+# ── Stats engine ──────────────────────────────────────────────────────────────
+def mkt_stats(values):
+    """
+    values: list of True/False/None (ordered date ASC)
+    Returns {pct, count, total, max_pos, max_neg, delay}
+    """
+    valid = [v for v in values if v is not None]
+    n = len(valid)
+    if n == 0:
+        return {'pct': 0.0, 'count': 0, 'total': 0,
+                'max_pos': 0, 'max_neg': 0, 'delay': 0}
+
+    count    = sum(1 for v in valid if v)
+    pct      = round(count / n * 100, 1)
+    max_pos  = max_neg = cur_pos = cur_neg = 0
+
+    for v in valid:
+        if v:
+            cur_pos += 1; cur_neg = 0
+        else:
+            cur_neg += 1; cur_pos = 0
+        max_pos = max(max_pos, cur_pos)
+        max_neg = max(max_neg, cur_neg)
+
+    delay = 0
+    for v in reversed(valid):
+        if not v:
+            delay += 1
+        else:
+            break
+
+    return {'pct': pct, 'count': count, 'total': n,
+            'max_pos': max_pos, 'max_neg': max_neg, 'delay': delay}
+
+def compute_stats(matches_asc):
+    """
+    matches_asc: list of dicts sorted by sort_date ASC
+    Returns full stats dict for the frontend.
+    """
+    if not matches_asc:
+        return {'total': 0}
+
+    def M(fn):
+        return mkt_stats([fn(m) for m in matches_asc])
+
+    fg_has = [m for m in matches_asc if m.get('fg_result')]
+
+    # Stagioni presenti
+    seasons = {}
+    for m in matches_asc:
+        s = m.get('season', '')
+        seasons[s] = seasons.get(s, 0) + 1
+
+    # Avg minute primo gol
+    mins = [m['first_goal_min'] for m in matches_asc
+            if m.get('first_goal_min') is not None]
+    avg_min = round(sum(mins)/len(mins), 1) if mins else 0
+
+    # Distribuzione per minuto (1–16)
+    dist = {str(i): 0 for i in range(1, 17)}
+    for mn in mins:
+        k = str(min(mn, 16))
+        if k in dist:
+            dist[k] += 1
+
+    return {
+        'total':      len(matches_asc),
+        'seasons':    dict(sorted(seasons.items())),
+        'avg_min':    avg_min,
+        'min_dist':   dist,
+
+        # Gol totali
+        'over_15':   M(lambda m: m['total_goals'] > 1),
+        'over_25':   M(lambda m: m['total_goals'] > 2),
+        'over_35':   M(lambda m: m['total_goals'] > 3),
+        'over_45':   M(lambda m: m['total_goals'] > 4),
+
+        # BTTS
+        'btts':      M(lambda m: bool(m['btts'])),
+        'no_btts':   M(lambda m: not bool(m['btts'])),
+
+        # Risultato
+        'res_1':     M(lambda m: m['result'] == '1'),
+        'res_x':     M(lambda m: m['result'] == 'X'),
+        'res_2':     M(lambda m: m['result'] == '2'),
+
+        # Gol casa / ospite
+        'home_gol':  M(lambda m: m['ft_home'] > 0),
+        'away_gol':  M(lambda m: m['ft_away'] > 0),
+
+        # 1° Tempo
+        'ht_ov05':   M(lambda m: m['ht_goals'] > 0),
+        'ht_ov15':   M(lambda m: m['ht_goals'] > 1),
+
+        # 2° Tempo
+        'st_ov05':   M(lambda m: m['st_goals'] > 0),
+        'st_ov15':   M(lambda m: m['st_goals'] > 1),
+
+        # Primo gol (solo partite con fg_result)
+        'fg_win':    mkt_stats([True  if m['fg_result']=='win'  else
+                                (False if m['fg_result'] else None)
+                                for m in matches_asc]),
+        'fg_loss':   mkt_stats([True  if m['fg_result']=='loss' else
+                                (False if m['fg_result'] else None)
+                                for m in matches_asc]),
+        'fg_draw':   mkt_stats([True  if m['fg_result']=='draw' else
+                                (False if m['fg_result'] else None)
+                                for m in matches_asc]),
+        'fg_home_first': mkt_stats([True  if m['first_goal_team']=='home' else
+                                    (False if m['first_goal_team'] else None)
+                                    for m in matches_asc]),
+        'fg_away_first': mkt_stats([True  if m['first_goal_team']=='away' else
+                                    (False if m['first_goal_team'] else None)
+                                    for m in matches_asc]),
+    }
+
+# ── Live polling state ────────────────────────────────────────────────────────
+live_store     = {'fixtures': [], 'updated_at': 0, 'error': None}
+archive_log    = []          # partite archiviate di recente
+live_tracking  = {}          # fid → {'status','score_home','score_away','first_goal_min','first_goal_team'}
+_lock          = threading.Lock()
+
+def api_get(path, params=None):
+    url = API_BASE + path
+    hdrs = {'x-apisports-key': API_KEY}
+    if HAS_REQUESTS:
+        r = req_lib.get(url, params=params, headers=hdrs, timeout=15)
+        return r.json()
+    if params:
+        url += '?' + urllib.parse.urlencode(params)
+    rq = urllib.request.Request(url, headers=hdrs)
+    with urllib.request.urlopen(rq, timeout=15) as resp:
+        return json.loads(resp.read())
+
+def fetch_first_goal(fixture_id):
+    """Ritorna (team, minute) del primo gol della partita"""
+    try:
+        data   = api_get('/fixtures/events', {'fixture': fixture_id})
+        events = data.get('response', [])
+        goals  = [
+            e for e in events
+            if e.get('type') == 'Goal'
+            and e.get('detail') not in ('Missed Penalty', 'Penalty missed')
+        ]
+        if not goals:
+            return None, None
+        goals.sort(key=lambda e: (e.get('time', {}).get('elapsed') or 999))
+        first = goals[0]
+        elapsed = first.get('time', {}).get('elapsed') or 0
+        extra   = first.get('time', {}).get('extra') or 0
+        minute  = elapsed + extra
+        home_name = ''   # verrà confrontato con il nome squadra di casa dalla partita
+        return first.get('team', {}).get('name', ''), minute
+    except Exception as e:
+        return None, None
+
+def build_goals_html(events, home_name):
+    goals = [
+        e for e in events
+        if e.get('type') == 'Goal'
+        and e.get('detail') not in ('Missed Penalty', 'Penalty missed')
+    ]
+    goals.sort(key=lambda e: e.get('time', {}).get('elapsed') or 0)
+    parts = []
+    for g in goals:
+        el  = g.get('time', {}).get('elapsed') or 0
+        ext = g.get('time', {}).get('extra')
+        ms  = f"{el}+{ext}'" if ext else f"{el}'"
+        is_away = g.get('team', {}).get('name', '') != home_name
+        parts.append(f'<span class="away-goal">{ms}</span>' if is_away else ms)
+    return ', '.join(parts)
+
+def archive_match_to_db(fx_data, events):
+    lid = fx_data['league']['id']
+    rows = query("SELECT id FROM leagues WHERE id=?", (lid,))
+    if not rows:
+        return False
+
+    goals = [
+        e for e in events
+        if e.get('type') == 'Goal'
+        and e.get('detail') not in ('Missed Penalty', 'Penalty missed')
+    ]
+    if not goals:
+        return False
+    goals.sort(key=lambda e: e.get('time', {}).get('elapsed') or 999)
+    fg_min = (goals[0].get('time', {}).get('elapsed') or 0) + (goals[0].get('time', {}).get('extra') or 0)
+    if fg_min > 16:
+        return False
+
+    fx     = fx_data['fixture']
+    teams  = fx_data['teams']
+    score  = fx_data['score']
+    gl     = fx_data['goals']
+
+    dt       = datetime.fromisoformat(fx['date'].replace('Z', '+00:00'))
+    date_str = dt.strftime('%d/%m/%Y')
+    time_str = dt.strftime('%H:%M')
+    season   = str(fx_data['league']['season'])
+    home     = teams['home']['name']
+    away     = teams['away']['name']
+
+    ht_h = score['halftime']['home']  or 0
+    ht_a = score['halftime']['away']  or 0
+    ft_h = gl['home'] or 0
+    ft_a = gl['away'] or 0
+    st_h = ft_h - ht_h
+    st_a = ft_a - ht_a
+
+    total_goals = ft_h + ft_a
+    ht_goals    = ht_h + ht_a
+    st_goals    = st_h + st_a
+    btts        = 1 if (ft_h > 0 and ft_a > 0) else 0
+
+    if ft_h > ft_a:   result = '1'
+    elif ft_h < ft_a: result = '2'
+    else:             result = 'X'
+
+    fg_team_name = goals[0].get('team', {}).get('name', '')
+    fg_team      = 'home' if fg_team_name == home else 'away'
+    fg_result    = ('win'  if (fg_team=='home' and ft_h>ft_a) or (fg_team=='away' and ft_a>ft_h)
+                    else 'loss' if (fg_team=='home' and ft_h<ft_a) or (fg_team=='away' and ft_a<ft_h)
+                    else 'draw')
+
+    goals_html = build_goals_html(events, home)
+    goals_text = re.sub(r'<[^>]+>', '', goals_html)
+    sort_date  = f"{dt.strftime('%Y%m%d')}"
+
+    execute("""
+        INSERT INTO matches (
+            league_id, season, date_str, sort_date, time_str,
+            home_team, away_team,
+            ht_home, ht_away, st_home, st_away, ft_home, ft_away,
+            total_goals, ht_goals, st_goals, btts, result,
+            goals_html, goals_text,
+            first_goal_min, first_goal_team, fg_result, is_archived
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+    """, (lid, season, date_str, sort_date, time_str,
+          home, away,
+          ht_h, ht_a, st_h, st_a, ft_h, ft_a,
+          total_goals, ht_goals, st_goals, btts, result,
+          goals_html, goals_text, fg_min, fg_team, fg_result))
+
+    entry = {
+        'ts': datetime.now().strftime('%d/%m/%Y %H:%M'),
+        'league_id':   lid,
+        'league_name': query("SELECT name FROM leagues WHERE id=?", (lid,))[0]['name'],
+        'home': home, 'away': away,
+        'final': f"{ft_h}-{ft_a}",
+        'first_min': fg_min,
+    }
+    with _lock:
+        archive_log.append(entry)
+    print(f"[archive] ✓ {home} vs {away} ({ft_h}-{ft_a}) – lega {lid} – 1° gol min {fg_min}")
+    return True
+
+# ── Background live poller ────────────────────────────────────────────────────
+def poll_once():
+    """Esegue un singolo ciclo di polling. Può essere chiamato anche manualmente."""
+    leagues_ids = set(
+        r['id'] for r in query("SELECT id FROM leagues")
+    )
+
+    data     = api_get('/fixtures', {'live': 'all'})
+    errors   = data.get('errors', {})
+    if errors:
+        raise Exception(f"API errors: {errors}")
+
+    fixtures = data.get('response', [])
+    print(f"[poll] API live=all: {len(fixtures)} partite totali da API")
+
+    current_ids = set()
+    live_now    = []
+
+    for fx in fixtures:
+        lid = fx['league']['id']
+        if lid not in leagues_ids:
+            continue
+
+        fid   = fx['fixture']['id']
+        home  = fx['teams']['home']['name']
+        away  = fx['teams']['away']['name']
+        sc_h  = fx['goals']['home'] or 0
+        sc_a  = fx['goals']['away'] or 0
+        total = sc_h + sc_a
+
+        current_ids.add(fid)
+        prev = live_tracking.get(fid, {})
+
+        fg_min  = prev.get('first_goal_min')
+        fg_team = prev.get('first_goal_team')
+        qualifies = prev.get('qualifies', None)
+
+        # Se c'è un nuovo gol e non conosciamo ancora il primo gol
+        if total > 0 and fg_min is None:
+            fg_team_name, fg_min = fetch_first_goal(fid)
+            if fg_team_name is not None:
+                fg_team = 'home' if fg_team_name == home else 'away'
+            qualifies = fg_min is not None and fg_min <= 16
+            print(f"[poll] {home} vs {away} (lega {lid}): 1° gol min {fg_min} team={fg_team} qualifies={qualifies}")
+
+        live_tracking[fid] = {
+            'status':           fx['fixture']['status']['short'],
+            'score_home':       sc_h,
+            'score_away':       sc_a,
+            'first_goal_min':   fg_min,
+            'first_goal_team':  fg_team,
+            'qualifies':        qualifies,
+        }
+
+        live_now.append({
+            'id':            fid,
+            'minute':        fx['fixture']['status']['elapsed'] or 0,
+            'status':        fx['fixture']['status']['short'],
+            'home':          home,
+            'away':          away,
+            'league_id':     lid,
+            'league_name':   fx['league']['name'],
+            'country':       fx['league']['country'],
+            'score_home':    sc_h,
+            'score_away':    sc_a,
+            'ht_home':       fx['score']['halftime']['home'],
+            'ht_away':       fx['score']['halftime']['away'],
+            'first_goal_min':  fg_min,
+            'first_goal_team': fg_team,
+            'qualifies':       qualifies,
+        })
+
+    with _lock:
+        live_store['fixtures']   = live_now
+        live_store['updated_at'] = int(time.time())
+        live_store['error']      = None
+
+    print(f"[poll] ✓ {len(live_now)} partite nei nostri campionati")
+
+    # Partite che erano live e ora non lo sono più → archivia
+    for fid, trk in list(live_tracking.items()):
+        if fid in current_ids:
+            continue
+        if trk.get('status') in ('FT', 'AET', 'PEN'):
+            continue
+        if trk.get('status') not in ('NS', 'PST', 'CANC', 'ABD', None):
+            try:
+                det = api_get('/fixtures', {'id': fid})
+                fxs = det.get('response', [])
+                if fxs and fxs[0]['fixture']['status']['short'] in ('FT', 'AET', 'PEN'):
+                    evs = api_get('/fixtures/events', {'fixture': fid})
+                    archive_match_to_db(fxs[0], evs.get('response', []))
+                    live_tracking[fid]['status'] = 'FT'
+            except Exception as e:
+                print(f"[poll] Errore archivio {fid}: {e}")
+
+
+def poll_loop():
+    time.sleep(5)
+    while True:
+        try:
+            poll_once()
+        except Exception as e:
+            with _lock:
+                live_store['error'] = str(e)
+            print(f"[poll] Errore: {e}")
+        time.sleep(POLL_SECONDS)
+
+# ── API Routes ────────────────────────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    resp = send_from_directory('templates', 'index.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
+@app.route('/api/leagues')
+def api_leagues():
+    rows = query("""
+        SELECT l.id, l.name,
+               COUNT(m.id) AS match_count
+        FROM leagues l
+        LEFT JOIN matches m ON m.league_id = l.id
+        GROUP BY l.id
+        ORDER BY l.name
+    """)
+    return jsonify(rows)
+
+@app.route('/api/leagues/<int:lid>')
+def api_league_detail(lid):
+    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    if not info:
+        return jsonify({'error': 'Not found'}), 404
+
+    # Ultimi 30 per la tabella (desc)
+    recent = query("""
+        SELECT season, date_str, time_str, home_team, away_team,
+               ht_home, ht_away, st_home, st_away, ft_home, ft_away,
+               total_goals, btts, result, goals_html, goals_text,
+               q1, qx, q2, first_goal_min, first_goal_team, fg_result
+        FROM matches WHERE league_id=?
+        ORDER BY sort_date DESC, time_str DESC
+        LIMIT 30
+    """, (lid,))
+
+    # Tutte per le statistiche (asc)
+    all_m = query("""
+        SELECT total_goals, ht_goals, st_goals, btts, result,
+               ft_home, ft_away, first_goal_min, first_goal_team, fg_result,
+               season, sort_date
+        FROM matches WHERE league_id=?
+        ORDER BY sort_date ASC, time_str ASC
+    """, (lid,))
+
+    stats = compute_stats(all_m)
+
+    # Stagioni disponibili per il filtro
+    seasons = sorted({m['season'] for m in all_m}, reverse=True)
+
+    # Formatta recent per il frontend (aggiungi stringhe score)
+    for r in recent:
+        r['ht']    = f"{r['ht_home']}-{r['ht_away']}"
+        r['ht2']   = f"{r['st_home']}-{r['st_away']}"
+        r['final'] = f"{r['ft_home']}-{r['ft_away']}"
+
+    return jsonify({
+        'id':      lid,
+        'name':    info[0]['name'],
+        'stats':   stats,
+        'recent':  recent,
+        'seasons': seasons,
+    })
+
+@app.route('/api/live')
+def api_live():
+    with _lock:
+        return jsonify(live_store)
+
+@app.route('/api/archive-log')
+def api_archive_log():
+    with _lock:
+        return jsonify(archive_log[-100:])
+
+@app.route('/api/reload', methods=['POST'])
+def api_reload():
+    """Ricarica un campionato dal DB (utile dopo archivio)"""
+    return jsonify({'ok': True})
+
+@app.route('/api/force-poll', methods=['POST'])
+def api_force_poll():
+    """Forza un ciclo di polling immediato in background"""
+    def do_poll():
+        try:
+            poll_once()
+        except Exception as e:
+            print(f"[force-poll] Errore: {e}")
+    t = threading.Thread(target=do_poll, daemon=True)
+    t.start()
+    return jsonify({'ok': True, 'msg': 'Poll avviato'})
+
+@app.route('/api/debug-live')
+def api_debug_live():
+    """Ritorna il raw API response per debug (solo live=all)"""
+    try:
+        data = api_get('/fixtures', {'live': 'all'})
+        fixtures = data.get('response', [])
+        leagues_ids = set(r['id'] for r in query("SELECT id FROM leagues"))
+        result = []
+        for fx in fixtures:
+            lid = fx['league']['id']
+            result.append({
+                'id': fx['fixture']['id'],
+                'league_id': lid,
+                'league_name': fx['league']['name'],
+                'country': fx['league']['country'],
+                'home': fx['teams']['home']['name'],
+                'away': fx['teams']['away']['name'],
+                'score': f"{fx['goals']['home'] or 0}-{fx['goals']['away'] or 0}",
+                'minute': fx['fixture']['status']['elapsed'],
+                'status': fx['fixture']['status']['short'],
+                'in_our_db': lid in leagues_ids,
+            })
+        return jsonify({'total': len(result), 'fixtures': result,
+                        'errors': data.get('errors', {}),
+                        'remaining': data.get('response', []) and data.get('paging', {})})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ── SSE per aggiornamenti push ────────────────────────────────────────────────
+@app.route('/api/events')
+def api_events():
+    """Server-Sent Events: invia aggiornamenti live ogni 30s"""
+    def stream():
+        last_count = 0
+        while True:
+            with _lock:
+                current = live_store.copy()
+                a_count = len(archive_log)
+            payload = json.dumps({
+                'live':     current,
+                'archived': archive_log[-5:] if a_count > last_count else [],
+            })
+            yield f"data: {payload}\n\n"
+            last_count = a_count
+            time.sleep(30)
+
+    return Response(stream(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache',
+                             'X-Accel-Buffering': 'no'})
+
+# ── Health check per Render ───────────────────────────────────────────────────
+@app.route('/health')
+def health():
+    leagues = query("SELECT COUNT(*) AS n FROM leagues")[0]['n']
+    matches = query("SELECT COUNT(*) AS n FROM matches")[0]['n']
+    return jsonify({'status': 'ok', 'leagues': leagues, 'matches': matches})
+
+# ── Avvio ─────────────────────────────────────────────────────────────────────
+def tables_exist():
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1 FROM leagues LIMIT 1")
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+def init_db():
+    """Decomprime football.db.gz se necessario (per Render/cloud)"""
+    gz_path = DB_PATH.parent / 'football.db.gz'
+    if not DB_PATH.exists() and gz_path.exists():
+        import gzip, shutil
+        print("  Decompressione football.db.gz...")
+        with gzip.open(gz_path, 'rb') as f_in:
+            with open(DB_PATH, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        print(f"  ✓ football.db ripristinato ({DB_PATH.stat().st_size // 1024} KB)")
+
+# Eseguito sia da gunicorn che da python app.py
+init_db()
+
+# Avvia thread polling (gunicorn workers=1, threads=4 → OK)
+_poll_thread = threading.Thread(target=poll_loop, daemon=True)
+_poll_thread.start()
+
+if __name__ == '__main__':
+    # Auto-migrazione se il DB è assente o vuoto
+    if not DB_PATH.exists() or not tables_exist():
+        print("=" * 55)
+        print("  Database non trovato o vuoto.")
+        print("  Avvio migrazione automatica dai file HTML...")
+        print("=" * 55)
+        try:
+            import migrate
+            migrate.DB_PATH = DB_PATH
+            migrate.DATA_DIR = DB_PATH.parent.parent  # Downloads/
+            migrate.run()
+        except Exception as e:
+            print(f"ERRORE migrazione: {e}")
+            print("Assicurati che i file *_gol-16min_2010-2024.html")
+            print(f"siano nella cartella: {DB_PATH.parent.parent}")
+            raise SystemExit(1)
+
+    print("=" * 55)
+    print("  Football Stats Live App")
+    print("=" * 55)
+    leagues = query("SELECT COUNT(*) AS n FROM leagues")[0]['n']
+    matches = query("SELECT COUNT(*) AS n FROM matches")[0]['n']
+    print(f"  Campionati: {leagues} | Partite: {matches:,}")
+    print(f"  Polling live ogni {POLL_SECONDS}s")
+    print(f"  ► http://localhost:{PORT}")
+    print("=" * 55)
+
+    app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
