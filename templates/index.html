@@ -776,7 +776,7 @@ document.querySelectorAll('.lv-tab').forEach(tab=>{
 });
 
 // ══ LIVE ═════════════════════════════════════════════════════════════
-async const _isMobile=()=>window.innerWidth<768;
+const _isMobile=()=>window.innerWidth<768;
 function toggleSidebar(forceClose=false){
   const sb=$('sidebar');const overlay=$('sb-overlay');
   const isCollapsed=sb.classList.contains('collapsed');
@@ -785,7 +785,7 @@ function toggleSidebar(forceClose=false){
   else{sb.classList.remove('collapsed');if(_isMobile())overlay.classList.add('visible');$('sb-toggle-btn').textContent='✕';}
 }
 
-function loadLive(){
+async function loadLive(){
   try{
     const res=await fetch('/api/live');
     const data=await res.json();
