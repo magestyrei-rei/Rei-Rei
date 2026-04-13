@@ -1,5 +1,5 @@
 """
-app.py  â  Football Stats Live Web App
+app.py  Ã¢ÂÂ  Football Stats Live Web App
 Avvio locale : python app.py
 Cloud        : vedi README_DEPLOY.md
 """
@@ -16,7 +16,7 @@ except ImportError:
     import urllib.request, urllib.parse
     HAS_REQUESTS = False
 
-# ââ Config ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Config Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 API_KEY      = os.environ.get('API_KEY',  'd440bc0c72f6ef65a024d6bb5483e965')
 API_BASE     = 'https://v3.football.api-sports.io'
 DB_PATH      = Path(__file__).parent / 'football.db'
@@ -25,7 +25,7 @@ PORT         = int(os.environ.get('PORT', '5000'))
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
-# ââ DB helper âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ DB helper Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -43,7 +43,7 @@ def execute(sql, params=()):
     conn.commit()
     conn.close()
 
-# ââ Stats engine ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Stats engine Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 def mkt_stats(values):
     """
     values: list of True/False/None (ordered date ASC)
@@ -101,7 +101,7 @@ def compute_stats(matches_asc):
             if m.get('first_goal_min') is not None]
     avg_min = round(sum(mins)/len(mins), 1) if mins else 0
 
-    # Distribuzione per minuto (1â16)
+    # Distribuzione per minuto (1Ã¢ÂÂ16)
     dist = {str(i): 0 for i in range(1, 17)}
     for mn in mins:
         k = str(min(mn, 16))
@@ -133,11 +133,11 @@ def compute_stats(matches_asc):
         'home_gol':  M(lambda m: m['ft_home'] > 0),
         'away_gol':  M(lambda m: m['ft_away'] > 0),
 
-        # 1Â° Tempo
+        # 1ÃÂ° Tempo
         'ht_ov05':   M(lambda m: m['ht_goals'] > 0),
         'ht_ov15':   M(lambda m: m['ht_goals'] > 1),
 
-        # 2Â° Tempo
+        # 2ÃÂ° Tempo
         'st_ov05':   M(lambda m: m['st_goals'] > 0),
         'st_ov15':   M(lambda m: m['st_goals'] > 1),
 
@@ -159,10 +159,10 @@ def compute_stats(matches_asc):
                                     for m in matches_asc]),
     }
 
-# ââ Live polling state ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Live polling state Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 live_store     = {'fixtures': [], 'updated_at': 0, 'error': None}
 archive_log    = []          # partite archiviate di recente
-live_tracking  = {}          # fid â {'status','score_home','score_away','first_goal_min','first_goal_team'}
+live_tracking  = {}          # fid Ã¢ÂÂ {'status','score_home','score_away','first_goal_min','first_goal_team'}
 _lock          = threading.Lock()
 
 def api_get(path, params=None):
@@ -194,7 +194,7 @@ def fetch_first_goal(fixture_id):
         elapsed = first.get('time', {}).get('elapsed') or 0
         extra   = first.get('time', {}).get('extra') or 0
         minute  = elapsed + extra
-        home_name = ''   # verrÃ  confrontato con il nome squadra di casa dalla partita
+        home_name = ''   # verrÃÂ  confrontato con il nome squadra di casa dalla partita
         return first.get('team', {}).get('name', ''), minute
     except Exception as e:
         return None, None
@@ -296,12 +296,12 @@ def archive_match_to_db(fx_data, events):
     }
     with _lock:
         archive_log.append(entry)
-    print(f"[archive] â {home} vs {away} ({ft_h}-{ft_a}) â lega {lid} â 1Â° gol min {fg_min}")
+    print(f"[archive] Ã¢ÂÂ {home} vs {away} ({ft_h}-{ft_a}) Ã¢ÂÂ lega {lid} Ã¢ÂÂ 1ÃÂ° gol min {fg_min}")
     return True
 
-# ââ Background live poller ââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Background live poller Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 def poll_once():
-    """Esegue un singolo ciclo di polling. PuÃ² essere chiamato anche manualmente."""
+    """Esegue un singolo ciclo di polling. PuÃÂ² essere chiamato anche manualmente."""
     leagues_ids = set(
         r['id'] for r in query("SELECT id FROM leagues")
     )
@@ -336,13 +336,13 @@ def poll_once():
         fg_team = prev.get('first_goal_team')
         qualifies = prev.get('qualifies', None)
 
-        # Se c'Ã¨ un nuovo gol e non conosciamo ancora il primo gol
+        # Se c'ÃÂ¨ un nuovo gol e non conosciamo ancora il primo gol
         if total > 0 and fg_min is None:
             fg_team_name, fg_min = fetch_first_goal(fid)
             if fg_team_name is not None:
                 fg_team = 'home' if fg_team_name == home else 'away'
             qualifies = fg_min is not None and fg_min <= 16
-            print(f"[poll] {home} vs {away} (lega {lid}): 1Â° gol min {fg_min} team={fg_team} qualifies={qualifies}")
+            print(f"[poll] {home} vs {away} (lega {lid}): 1ÃÂ° gol min {fg_min} team={fg_team} qualifies={qualifies}")
 
         live_tracking[fid] = {
             'status':           fx['fixture']['status']['short'],
@@ -376,9 +376,9 @@ def poll_once():
         live_store['updated_at'] = int(time.time())
         live_store['error']      = None
 
-    print(f"[poll] â {len(live_now)} partite nei nostri campionati")
+    print(f"[poll] Ã¢ÂÂ {len(live_now)} partite nei nostri campionati")
 
-    # Partite che erano live e ora non lo sono piÃ¹ â archivia
+    # Partite che erano live e ora non lo sono piÃÂ¹ Ã¢ÂÂ archivia
     for fid, trk in list(live_tracking.items()):
         if fid in current_ids:
             continue
@@ -407,7 +407,7 @@ def poll_loop():
             print(f"[poll] Errore: {e}")
         time.sleep(POLL_SECONDS)
 
-# ââ API Routes ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ API Routes Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 
 @app.route('/')
 def index():
@@ -529,7 +529,7 @@ def api_debug_live():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ââ SSE per aggiornamenti push ââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ SSE per aggiornamenti push Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 @app.route('/api/events')
 def api_events():
     """Server-Sent Events: invia aggiornamenti live ogni 30s"""
@@ -551,14 +551,14 @@ def api_events():
                     headers={'Cache-Control': 'no-cache',
                              'X-Accel-Buffering': 'no'})
 
-# ââ Health check per Render âââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Health check per Render Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 @app.route('/health')
 def health():
     leagues = query("SELECT COUNT(*) AS n FROM leagues")[0]['n']
     matches = query("SELECT COUNT(*) AS n FROM matches")[0]['n']
     return jsonify({'status': 'ok', 'leagues': leagues, 'matches': matches})
 
-# ââ Avvio âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# Ã¢ÂÂÃ¢ÂÂ Avvio Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 def tables_exist():
     try:
         conn = get_db()
@@ -577,66 +577,18 @@ def init_db():
         with gzip.open(gz_path, 'rb') as f_in:
             with open(DB_PATH, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
-        print(f"  â football.db ripristinato ({DB_PATH.stat().st_size // 1024} KB)")
+        print(f"  Ã¢ÂÂ football.db ripristinato ({DB_PATH.stat().st_size // 1024} KB)")
 
 # Eseguito sia da gunicorn che da python app.py
 init_db()
 
-# Avvia thread polling (gunicorn workers=1, threads=4 â OK)
+# Avvia thread polling (gunicorn workers=1, threads=4 Ã¢ÂÂ OK)
 _poll_thread = threading.Thread(target=poll_loop, daemon=True)
 _poll_thread.start()
 
 
-@app.route('/api/admin/fix-leagues', methods=['POST'])
-def admin_fix_leagues():
-    conn = get_db()
-    try:
-        # 1. Rinomina 181 e 182
-        conn.execute("UPDATE leagues SET name='Scotland - FA Cup' WHERE id=181")
-        conn.execute("UPDATE leagues SET name='Scotland - Challenge Cup' WHERE id=182")
-
-        # 2. Merge 292 -> 62 (K League 1) senza duplicati
-        conn.execute("""
-            UPDATE matches SET league_id=62
-            WHERE league_id=292
-            AND NOT EXISTS (
-                SELECT 1 FROM matches m2
-                WHERE m2.league_id=62
-                AND m2.home_team=matches.home_team
-                AND m2.away_team=matches.away_team
-                AND m2.date_str=matches.date_str
-            )
-        """)
-        conn.execute("DELETE FROM matches WHERE league_id=292")
-        conn.execute("DELETE FROM leagues WHERE id=292")
-
-        # 3. Merge 408 -> 203 (NI Premiership) senza duplicati
-        conn.execute("""
-            UPDATE matches SET league_id=203
-            WHERE league_id=408
-            AND NOT EXISTS (
-                SELECT 1 FROM matches m2
-                WHERE m2.league_id=203
-                AND m2.home_team=matches.home_team
-                AND m2.away_team=matches.away_team
-                AND m2.date_str=matches.date_str
-            )
-        """)
-        conn.execute("DELETE FROM matches WHERE league_id=408")
-        conn.execute("DELETE FROM leagues WHERE id=408")
-
-        conn.commit()
-        rows_62  = conn.execute("SELECT COUNT(*) FROM matches WHERE league_id=62").fetchone()[0]
-        rows_203 = conn.execute("SELECT COUNT(*) FROM matches WHERE league_id=203").fetchone()[0]
-        conn.close()
-        return jsonify({'ok': True, 'k_league_1_total': rows_62, 'ni_prem_total': rows_203})
-    except Exception as e:
-        conn.rollback(); conn.close()
-        return jsonify({'ok': False, 'error': str(e)}), 500
-
-
 if __name__ == '__main__':
-    # Auto-migrazione se il DB Ã¨ assente o vuoto
+    # Auto-migrazione se il DB ÃÂ¨ assente o vuoto
     if not DB_PATH.exists() or not tables_exist():
         print("=" * 55)
         print("  Database non trovato o vuoto.")
@@ -660,7 +612,7 @@ if __name__ == '__main__':
     matches = query("SELECT COUNT(*) AS n FROM matches")[0]['n']
     print(f"  Campionati: {leagues} | Partite: {matches:,}")
     print(f"  Polling live ogni {POLL_SECONDS}s")
-    print(f"  âº http://localhost:{PORT}")
+    print(f"  Ã¢ÂÂº http://localhost:{PORT}")
     print("=" * 55)
 
     app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
