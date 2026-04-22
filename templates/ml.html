@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rei-Rei - ML Predictor early-goal</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0f172a;color:#e2e8f0;min-height:100vh}
+  header{background:#1e293b;border-bottom:1px solid #334155;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+  header h1{color:#f1f5f9;font-size:18px;margin:0}
+  header .sub{color:#94a3b8;font-size:12px;margin-top:2px}
+  header a{color:#38bdf8;text-decoration:none;font-size:13px;padding:6px 12px;border:1px solid #334155;border-radius:6px}
+  header a:hover{background:#334155}
+  main{padding:20px 24px;max-width:1400px;margin:0 auto}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px;background:#1e293b;padding:14px;border-radius:10px;border:1px solid #334155}
+  .controls label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#cbd5e1}
+  select{padding:8px 10px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:14px}
+  .meta-bar{margin-bottom:14px;font-size:13px;color:#94a3b8;background:#1e293b;padding:10px 14px;border-radius:8px;border:1px solid #334155}
+  .tag{display:inline-block;padding:2px 8px;border-radius:4px;background:#334155;color:#cbd5e1;font-size:11px;margin-right:6px}
+  .warn{color:#fbbf24}
+  .ok{color:#34d399}
+  .bad{color:#f87171}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px}
+  .mkt{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#94a3b8;margin-bottom:6px}
+  .prob{font-size:26px;font-weight:700;color:#f1f5f9}
+  .prob.high{color:#34d399}
+  .prob.low{color:#f87171}
+  .quota{font-size:12px;color:#38bdf8;margin-top:4px}
+  .section-title{font-size:13px;color:#cbd5e1;margin:20px 0 10px 0;text-transform:uppercase;letter-spacing:.5px}
+  .notes{margin-top:24px;font-size:12px;color:#94a3b8;background:#1e293b;padding:14px;border-radius:8px;border:1px solid #334155;line-height:1.6}
+  .notes b{color:#cbd5e1}
+  .err{background:#7f1d1d;color:#fecaca;padding:14px;border-radius:8px;margin:20px 0}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ML Predictor - Primo gol entro il 16'</h1>
+    <div class="sub">Predizioni condizionate su early-goal avvenuto - modello empirico con smoothing Laplace</div>
+  </div>
+  <a href="/">Torna alle statistiche</a>
+</header>
+<main>
+  <div class="controls">
+    <label>Campionato<select id="league"></select></label>
+    <label>Chi ha segnato per primo<select id="pg"><option value="casa">Casa</option><option value="ospite">Ospite</option></select></label>
+    <label>Risultato primo tempo<select id="ht"></select></label>
+  </div>
+  <div class="meta-bar" id="meta"></div>
+  <div class="section-title">Probabilita finali (combo selezionata)</div>
+  <div class="grid" id="cards"></div>
+  <div class="section-title">Media campionato (tutte le partite early-goal)</div>
+  <div class="grid" id="league-cards"></div>
+  <div class="notes">
+    <b>Come leggere:</b> ogni card mostra la probabilita di un mercato finale (1X2, Over/Under, BTTS) <i>condizionata</i> a: campionato + chi ha segnato per primo + risultato al 45'. La <b>quota equa</b> e 1/p: se il bookie offre una quota maggiore, hai value.<br>
+    <b>Affidabilita:</b> se il campione per la combo selezionata ha meno di 20 partite le probabilita sono gia regredite verso la media del campionato (smoothing di Laplace, alpha=3), ma fidati meno. 20-50 = medio, oltre 50 = alto.<br>
+    <b>Limite:</b> il modello non include feature team-specifiche (forma, xG, scontri diretti), quindi Juve-Lecce e Empoli-Monza ricevono la stessa probabilita a parita di campionato+primo_gol+1T. Usare come prior, non come segnale unico.
+  </div>
+</main>
+<script>
+let DATA=null;
+const MK=[["1","1 (Casa)"],["X","X (Pareggio)"],["2","2 (Ospite)"],["over_1_5","Over 1.5"],["over_2_5","Over 2.5"],["over_3_5","Over 3.5"],["under_1_5","Under 1.5"],["under_2_5","Under 2.5"],["under_3_5","Under 3.5"],["btts_si","BTTS Si"],["btts_no","BTTS No"]];
+function pct(x){return (x*100).toFixed(1)+"%";}
+function fair(x){return x>0?(1/x).toFixed(2):"-";}
+function renderCards(t,node){t.innerHTML="";MK.forEach(function(e){var k=e[0],lab=e[1];var v=node[k]||0;var cls=v>=0.70?"high":(v<=0.25?"low":"");var d=document.createElement("div");d.className="card";d.innerHTML='<div class="mkt">'+lab+'</div><div class="prob '+cls+'">'+pct(v)+'</div><div class="quota">Quota equa: '+fair(v)+'</div>';t.appendChild(d);});}
+function sortScores(a,b){var A=a.split("-").map(Number),B=b.split("-").map(Number);return (A[0]-B[0])||(A[1]-B[1]);}
+function updateHt(){var l=document.getElementById("league").value;var p=document.getElementById("pg").value;var h=document.getElementById("ht");var cur=h.value;var node=(DATA.leagues[l].by_primo_gol_ht||{})[p]||{};var scores=Object.keys(node).sort(sortScores);h.innerHTML=scores.map(function(s){return '<option value="'+s+'">'+s+' ('+node[s].n+' partite)</option>';}).join("");if(scores.indexOf(cur)>=0)h.value=cur;}
+function upd(){var l=document.getElementById("league").value;var p=document.getElementById("pg").value;var ht=document.getElementById("ht").value;var lg=DATA.leagues[l];var leaf=(lg.by_primo_gol_ht[p]||{})[ht];var c=document.getElementById("cards");var m=document.getElementById("meta");if(!leaf){c.innerHTML='<div class="card">Nessun dato per questa combinazione.</div>';m.innerHTML="";}else{renderCards(c,leaf);var conf=leaf.n>=50?["ok","alto"]:leaf.n>=20?["warn","medio"]:["bad","basso"];m.innerHTML='<span class="tag">'+l+'</span><span class="tag">primo gol: '+p+'</span><span class="tag">1T: '+ht+'</span> Campione combo: <b>'+leaf.n+'</b> partite - affidabilita <span class="'+conf[0]+'">'+conf[1]+'</span> - totale campionato: '+lg.n+' partite';}var pgN=lg.by_primo_gol[p]||lg.overall;renderCards(document.getElementById("league-cards"),pgN);}
+fetch("/api/ml-data",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}).then(function(j){DATA=j;var ls=Object.keys(j.leagues).sort();var sel=document.getElementById("league");sel.innerHTML=ls.map(function(x){return '<option>'+x+'</option>';}).join("");var defs=["Italy - Serie A","England - Premier League","Spain - La Liga"];for(var i=0;i<defs.length;i++){if(ls.indexOf(defs[i])>=0){sel.value=defs[i];break;}}document.getElementById("league").addEventListener("change",function(){updateHt();upd();});document.getElementById("pg").addEventListener("change",function(){updateHt();upd();});document.getElementById("ht").addEventListener("change",upd);updateHt();upd();}).catch(function(e){document.querySelector("main").innerHTML='<div class="err">Errore nel caricamento di <code>/api/ml-data</code>: '+e.message+'.</div>';});
+</script>
+</body>
+  </html>
