@@ -8,6 +8,7 @@ import os, re, json, time, sqlite3, threading
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
+import ml
 
 try:
     import requests as req_lib
@@ -581,6 +582,8 @@ def init_db():
 
 # Eseguito sia da gunicorn che da python app.py
 init_db()
+
+ml.register(app, query)
 
 # Avvia thread polling (gunicorn workers=1, threads=4 ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ OK)
 _poll_thread = threading.Thread(target=poll_loop, daemon=True)
