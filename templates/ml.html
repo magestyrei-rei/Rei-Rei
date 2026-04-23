@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rei-Rei - ML Predictor early-goal</title>
+<title>Rei-Rei - ML Predictor Live</title>
 <style>
   *{box-sizing:border-box}
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0f172a;color:#e2e8f0;min-height:100vh}
@@ -13,62 +13,218 @@
   header a{color:#38bdf8;text-decoration:none;font-size:13px;padding:6px 12px;border:1px solid #334155;border-radius:6px}
   header a:hover{background:#334155}
   main{padding:20px 24px;max-width:1400px;margin:0 auto}
-  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px;background:#1e293b;padding:14px;border-radius:10px;border:1px solid #334155}
-  .controls label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#cbd5e1}
-  select{padding:8px 10px;border-radius:6px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-size:14px}
-  .meta-bar{margin-bottom:14px;font-size:13px;color:#94a3b8;background:#1e293b;padding:10px 14px;border-radius:8px;border:1px solid #334155}
-  .tag{display:inline-block;padding:2px 8px;border-radius:4px;background:#334155;color:#cbd5e1;font-size:11px;margin-right:6px}
-  .warn{color:#fbbf24}
-  .ok{color:#34d399}
-  .bad{color:#f87171}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
-  .card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px}
-  .mkt{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#94a3b8;margin-bottom:6px}
-  .prob{font-size:26px;font-weight:700;color:#f1f5f9}
-  .prob.high{color:#34d399}
-  .prob.low{color:#f87171}
-  .quota{font-size:12px;color:#38bdf8;margin-top:4px}
-  .section-title{font-size:13px;color:#cbd5e1;margin:20px 0 10px 0;text-transform:uppercase;letter-spacing:.5px}
-  .notes{margin-top:24px;font-size:12px;color:#94a3b8;background:#1e293b;padding:14px;border-radius:8px;border:1px solid #334155;line-height:1.6}
-  .notes b{color:#cbd5e1}
-  .err{background:#7f1d1d;color:#fecaca;padding:14px;border-radius:8px;margin:20px 0}
+  .tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid #334155}
+  .tab{padding:10px 18px;cursor:pointer;color:#94a3b8;border-bottom:2px solid transparent;font-size:14px}
+  .tab.active{color:#38bdf8;border-bottom-color:#38bdf8}
+  .tab:hover{color:#e2e8f0}
+  .view{display:none}
+  .view.active{display:block}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px;background:#1e293b;padding:14px;border-radius:10px;border:1px solid #334155}
+  .controls label{display:block;font-size:11px;color:#94a3b8;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+  .controls select{width:100%;padding:9px;border-radius:6px;background:#0f172a;color:#e2e8f0;border:1px solid #475569;font-size:13px}
+  .meta{font-size:12px;color:#94a3b8;margin-bottom:14px}
+  .meta b{color:#e2e8f0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+  @media(max-width:800px){.grid2{grid-template-columns:1fr}}
+  .panel{background:#1e293b;padding:14px;border-radius:10px;border:1px solid #334155}
+  .panel h3{margin:0 0 10px 0;color:#f1f5f9;font-size:14px;display:flex;justify-content:space-between;align-items:baseline}
+  .panel h3 span{font-size:11px;color:#94a3b8;font-weight:400}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+  .card{background:#0f172a;padding:10px;border-radius:6px;border:1px solid #334155}
+  .card .lab{font-size:10px;color:#94a3b8;text-transform:uppercase}
+  .card .val{font-size:20px;font-weight:700;color:#e2e8f0;margin:2px 0}
+  .card .q{font-size:11px;color:#38bdf8}
+  .empty{color:#64748b;font-style:italic;padding:20px;text-align:center}
+  .notes{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-top:18px;font-size:12px;color:#94a3b8;line-height:1.5}
+  .notes b{color:#e2e8f0}
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>ML Predictor - Primo gol entro il 16'</h1>
-    <div class="sub">Predizioni condizionate su early-goal avvenuto - modello empirico con smoothing Laplace</div>
+    <h1>Rei-Rei - ML Predictor</h1>
+    <div class="sub">Probabilita condizionate - live betting e early-goal legacy</div>
   </div>
-  <a href="/">Torna alle statistiche</a>
+  <a href="/">&larr; Home</a>
 </header>
+
 <main>
-  <div class="controls">
-    <label>Campionato<select id="league"></select></label>
-    <label>Chi ha segnato per primo<select id="pg"><option value="casa">Casa</option><option value="ospite">Ospite</option></select></label>
-    <label>Risultato primo tempo<select id="ht"></select></label>
+  <div class="tabs">
+    <div class="tab active" data-view="live">Live (minuto + score)</div>
+    <div class="tab" data-view="eg">Early-goal (legacy)</div>
   </div>
-  <div class="meta-bar" id="meta"></div>
-  <div class="section-title">Probabilita finali (combo selezionata)</div>
-  <div class="grid" id="cards"></div>
-  <div class="section-title">Media campionato (tutte le partite early-goal)</div>
-  <div class="grid" id="league-cards"></div>
+
+  <section class="view active" id="view-live">
+    <div class="controls">
+      <div>
+        <label>Campionato</label>
+        <select id="a-league"></select>
+      </div>
+      <div>
+        <label>Minuto snapshot</label>
+        <select id="a-min">
+          <option value="45">45' (fine 1T)</option>
+          <option value="60">60'</option>
+          <option value="70">70'</option>
+          <option value="80">80'</option>
+        </select>
+      </div>
+      <div>
+        <label>Score attuale</label>
+        <select id="a-score"></select>
+      </div>
+    </div>
+    <div class="meta" id="a-meta"></div>
+
+    <div class="grid2">
+      <div class="panel">
+        <h3>Probabilita FT <span id="a-ft-n"></span></h3>
+        <div class="cards" id="a-ft"></div>
+      </div>
+      <div class="panel">
+        <h3>Probabilita 2T (dal minuto attuale al 90) <span id="a-h2-n"></span></h3>
+        <div class="cards" id="a-h2"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Baseline campionato (overall, senza condizionamento)</h3>
+      <div class="cards" id="a-base"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-eg">
+    <div class="controls">
+      <div>
+        <label>Campionato</label>
+        <select id="e-league"></select>
+      </div>
+      <div>
+        <label>Chi segna per primo</label>
+        <select id="e-pg">
+          <option value="casa">Casa segna per prima</option>
+          <option value="ospite">Ospite segna per prima</option>
+        </select>
+      </div>
+      <div>
+        <label>Risultato 1T</label>
+        <select id="e-ht"></select>
+      </div>
+    </div>
+    <div class="meta" id="e-meta"></div>
+    <div class="panel">
+      <h3>Probabilita FT (condizionate a early-goal + 1T)</h3>
+      <div class="cards" id="e-cards"></div>
+    </div>
+  </section>
+
   <div class="notes">
-    <b>Come leggere:</b> ogni card mostra la probabilita di un mercato finale (1X2, Over/Under, BTTS) <i>condizionata</i> a: campionato + chi ha segnato per primo + risultato al 45'. La <b>quota equa</b> e 1/p: se il bookie offre una quota maggiore, hai value.<br>
-    <b>Affidabilita:</b> se il campione per la combo selezionata ha meno di 20 partite le probabilita sono gia regredite verso la media del campionato (smoothing di Laplace, alpha=3), ma fidati meno. 20-50 = medio, oltre 50 = alto.<br>
-    <b>Limite:</b> il modello non include feature team-specifiche (forma, xG, scontri diretti), quindi Juve-Lecce e Empoli-Monza ricevono la stessa probabilita a parita di campionato+primo_gol+1T. Usare come prior, non come segnale unico.
+    <b>Come usarlo:</b> seleziona campionato + minuto + score attuale. Se lo score esatto non e' disponibile,
+    seleziona il minuto piu' vicino e lo score, e confronta la quota offerta con la <i>quota equa</i>.
+    Se la quota del bookie e' almeno 5-10% sopra la quota equa hai edge positiva (assumendo campione sufficiente).<br>
+    <b>Limite:</b> no feature team-specifiche (xG, forma, H2H). Juve-Lecce e Empoli-Monza ricevono la stessa probabilita'
+    a parita' di campionato+minuto+score. Usare come <b>prior</b>, non come segnale unico.
   </div>
 </main>
+
 <script>
-let DATA=null;
-const MK=[["1","1 (Casa)"],["X","X (Pareggio)"],["2","2 (Ospite)"],["over_1_5","Over 1.5"],["over_2_5","Over 2.5"],["over_3_5","Over 3.5"],["under_1_5","Under 1.5"],["under_2_5","Under 2.5"],["under_3_5","Under 3.5"],["btts_si","BTTS Si"],["btts_no","BTTS No"]];
-function pct(x){return (x*100).toFixed(1)+"%";}
-function fair(x){return x>0?(1/x).toFixed(2):"-";}
-function renderCards(t,node){t.innerHTML="";MK.forEach(function(e){var k=e[0],lab=e[1];var v=node[k]||0;var cls=v>=0.70?"high":(v<=0.25?"low":"");var d=document.createElement("div");d.className="card";d.innerHTML='<div class="mkt">'+lab+'</div><div class="prob '+cls+'">'+pct(v)+'</div><div class="quota">Quota equa: '+fair(v)+'</div>';t.appendChild(d);});}
-function sortScores(a,b){var A=a.split("-").map(Number),B=b.split("-").map(Number);return (A[0]-B[0])||(A[1]-B[1]);}
-function updateHt(){var l=document.getElementById("league").value;var p=document.getElementById("pg").value;var h=document.getElementById("ht");var cur=h.value;var node=(DATA.leagues[l].by_primo_gol_ht||{})[p]||{};var scores=Object.keys(node).sort(sortScores);h.innerHTML=scores.map(function(s){return '<option value="'+s+'">'+s+' ('+node[s].n+' partite)</option>';}).join("");if(scores.indexOf(cur)>=0)h.value=cur;}
-function upd(){var l=document.getElementById("league").value;var p=document.getElementById("pg").value;var ht=document.getElementById("ht").value;var lg=DATA.leagues[l];var leaf=(lg.by_primo_gol_ht[p]||{})[ht];var c=document.getElementById("cards");var m=document.getElementById("meta");if(!leaf){c.innerHTML='<div class="card">Nessun dato per questa combinazione.</div>';m.innerHTML="";}else{renderCards(c,leaf);var conf=leaf.n>=50?["ok","alto"]:leaf.n>=20?["warn","medio"]:["bad","basso"];m.innerHTML='<span class="tag">'+l+'</span><span class="tag">primo gol: '+p+'</span><span class="tag">1T: '+ht+'</span> Campione combo: <b>'+leaf.n+'</b> partite - affidabilita <span class="'+conf[0]+'">'+conf[1]+'</span> - totale campionato: '+lg.n+' partite';}var pgN=lg.by_primo_gol[p]||lg.overall;renderCards(document.getElementById("league-cards"),pgN);}
-fetch("/api/ml-data",{cache:"no-store"}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}).then(function(j){DATA=j;var ls=Object.keys(j.leagues).sort();var sel=document.getElementById("league");sel.innerHTML=ls.map(function(x){return '<option>'+x+'</option>';}).join("");var defs=["Italy - Serie A","England - Premier League","Spain - La Liga"];for(var i=0;i<defs.length;i++){if(ls.indexOf(defs[i])>=0){sel.value=defs[i];break;}}document.getElementById("league").addEventListener("change",function(){updateHt();upd();});document.getElementById("pg").addEventListener("change",function(){updateHt();upd();});document.getElementById("ht").addEventListener("change",upd);updateHt();upd();}).catch(function(e){document.querySelector("main").innerHTML='<div class="err">Errore nel caricamento di <code>/api/ml-data</code>: '+e.message+'.</div>';});
+let ADV = null, EG = null;
+const FT = [
+  ["1","1 (Casa)"], ["X","X (Pari)"], ["2","2 (Ospite)"],
+  ["over_1_5","Over 1.5"], ["over_2_5","Over 2.5"], ["over_3_5","Over 3.5"],
+  ["under_1_5","Under 1.5"], ["under_2_5","Under 2.5"], ["under_3_5","Under 3.5"],
+  ["btts_si","BTTS Si"], ["btts_no","BTTS No"]
+];
+const H2 = [
+  ["2h_1","2T 1 (Casa)"], ["2h_X","2T X"], ["2h_2","2T 2 (Ospite)"],
+  ["2h_over_0_5","2T Over 0.5"], ["2h_over_1_5","2T Over 1.5"], ["2h_over_2_5","2T Over 2.5"],
+  ["2h_under_0_5","2T Under 0.5"], ["2h_under_1_5","2T Under 1.5"], ["2h_under_2_5","2T Under 2.5"],
+  ["2h_btts_si","2T BTTS Si"], ["2h_btts_no","2T BTTS No"]
+];
+const $ = function(id){ return document.getElementById(id); };
+const pct = function(v){ return (v == null ? "-" : (v*100).toFixed(1)+"%"); };
+const quota = function(v){ return (v == null || v <= 0 ? "-" : (1/v).toFixed(2)); };
+function scoreSort(a,b){
+  const p1 = a.split("-").map(Number), p2 = b.split("-").map(Number);
+  return (p1[0]+p1[1])-(p2[0]+p2[1]) || (p1[0]-p2[0]) || (p1[1]-p2[1]);
+}
+function renderCards(container, markets, node){
+  if (!node) { container.innerHTML = '<div class="empty">Nessun dato per questa combinazione</div>'; return; }
+  container.innerHTML = markets.map(function(pair){
+    const k = pair[0], lab = pair[1], v = node[k];
+    return '<div class="card"><div class="lab">'+lab+'</div><div class="val">'+pct(v)+'</div><div class="q">q '+quota(v)+'</div></div>';
+  }).join("");
+}
+
+document.querySelectorAll(".tab").forEach(function(t){
+  t.addEventListener("click", function(){
+    document.querySelectorAll(".tab").forEach(function(x){ x.classList.remove("active"); });
+    document.querySelectorAll(".view").forEach(function(x){ x.classList.remove("active"); });
+    t.classList.add("active");
+    $("view-"+t.dataset.view).classList.add("active");
+    if (t.dataset.view === "eg" && !EG) loadEG();
+  });
+});
+
+function aRefreshScores(){
+  const lg = ADV.leagues[$("a-league").value] || {};
+  const bm = (lg.by_minute || {})[$("a-min").value] || {};
+  const ks = Object.keys(bm).sort(scoreSort);
+  $("a-score").innerHTML = ks.length ? ks.map(function(s){ return '<option value="'+s+'">'+s+' (n='+bm[s].n+')</option>'; }).join("") : '<option value="">-</option>';
+}
+function aUpdate(){
+  const lg = ADV.leagues[$("a-league").value] || {};
+  const bm = (lg.by_minute || {})[$("a-min").value] || {};
+  const node = bm[$("a-score").value];
+  const base = lg.overall;
+  $("a-meta").innerHTML = 'Campionato: <b>'+$("a-league").value+'</b> (n tot='+(lg.n||0)+') - Minuto <b>'+$("a-min").value+"'</b> Score <b>"+($("a-score").value||"-")+'</b> - campione condizionato: <b>'+(node ? node.n : 0)+'</b>';
+  $("a-ft-n").textContent = node ? 'n='+node.n : '';
+  $("a-h2-n").textContent = node ? 'n='+node.n : '';
+  renderCards($("a-ft"), FT, node);
+  renderCards($("a-h2"), H2, node);
+  renderCards($("a-base"), FT, base);
+}
+function loadAdv(){
+  fetch("/api/ml-advanced").then(function(r){ return r.json(); }).then(function(j){
+    ADV = j;
+    const lgs = Object.keys(j.leagues).sort();
+    $("a-league").innerHTML = lgs.map(function(l){ return '<option>'+l+'</option>'; }).join("");
+    const defs = ["Italy - Serie A","England - Premier League","Spain - La Liga"];
+    for (let i=0; i<defs.length; i++){ if (lgs.indexOf(defs[i])>=0){ $("a-league").value = defs[i]; break; } }
+    ["a-league","a-min"].forEach(function(id){ $(id).addEventListener("change", function(){ aRefreshScores(); aUpdate(); }); });
+    $("a-score").addEventListener("change", aUpdate);
+    aRefreshScores(); aUpdate();
+  }).catch(function(e){ $("a-meta").textContent = "Errore caricamento /api/ml-advanced: " + e; });
+}
+
+function eRefreshHt(){
+  const lg = EG.leagues[$("e-league").value] || {};
+  const byPgHt = lg.by_primo_gol_ht || {};
+  const scores = Object.keys(byPgHt[$("e-pg").value] || {}).sort(scoreSort);
+  $("e-ht").innerHTML = scores.length ? scores.map(function(s){ return '<option>'+s+'</option>'; }).join("") : '<option value="">-</option>';
+}
+function eUpdate(){
+  const lg = EG.leagues[$("e-league").value] || {};
+  const byPgHt = lg.by_primo_gol_ht || {};
+  const node = (byPgHt[$("e-pg").value] || {})[$("e-ht").value];
+  $("e-meta").innerHTML = 'Campionato: <b>'+$("e-league").value+'</b> (n='+(lg.n||0)+') - Chi segna prima: <b>'+$("e-pg").value+'</b> - 1T: <b>'+($("e-ht").value||"-")+'</b> - campione: <b>'+(node ? node.n : 0)+'</b>';
+  renderCards($("e-cards"), FT, node);
+}
+function loadEG(){
+  fetch("/api/ml-data").then(function(r){ return r.json(); }).then(function(j){
+    EG = j;
+    const lgs = Object.keys(j.leagues).sort();
+    $("e-league").innerHTML = lgs.map(function(l){ return '<option>'+l+'</option>'; }).join("");
+    const defs = ["Italy - Serie A","England - Premier League","Spain - La Liga"];
+    for (let i=0; i<defs.length; i++){ if (lgs.indexOf(defs[i])>=0){ $("e-league").value = defs[i]; break; } }
+    ["e-league","e-pg"].forEach(function(id){ $(id).addEventListener("change", function(){ eRefreshHt(); eUpdate(); }); });
+    $("e-ht").addEventListener("change", eUpdate);
+    eRefreshHt(); eUpdate();
+  }).catch(function(e){ $("e-meta").textContent = "Errore caricamento /api/ml-data: " + e; });
+}
+
+loadAdv();
 </script>
 </body>
-  </html>
+</html>
+
