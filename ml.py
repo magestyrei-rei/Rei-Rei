@@ -18,7 +18,8 @@ _MK_FT = ['1', 'X', '2',
 _MK_2H = ['2h_1', '2h_X', '2h_2',
           '2h_over_0_5', '2h_over_1_5', '2h_over_2_5',
           '2h_under_0_5', '2h_under_1_5', '2h_under_2_5',
-          '2h_btts_si', '2h_btts_no']
+          '2h_btts_si', '2h_btts_no',
+          '2h_home_scores', '2h_away_scores']
 
 _MK_ALL = _MK_FT + _MK_2H
 
@@ -118,6 +119,8 @@ def _2h_metrics(r):
         '2h_under_2_5': 1 if sg < 3 else 0,
         '2h_btts_si': btts2,
         '2h_btts_no': 1 - btts2,
+        '2h_home_scores': 1 if sh > 0 else 0,
+        '2h_away_scores': 1 if sa > 0 else 0,
     }
 
 
@@ -153,7 +156,7 @@ def _norm_1x2(d):
     return d
 
 
-# ─────────────────── Early-goal predictor (legacy /ml) ───────────────────
+# âââââââââââââââââââ Early-goal predictor (legacy /ml) âââââââââââââââââââ
 
 def _build_eg_data(query_fn):
     rows = query_fn("""
@@ -208,6 +211,22 @@ def _build_eg_data(query_fn):
                     continue
                 ht_p = _norm_1x2(_shrink(len(hms), _aggr(hms, _MK_FT), parent_pg, _MK_FT))
                 ht_p['n'] = len(hms)
+                # Correggi mercati che diventano certi dato il punteggio HT
+                h_ht, a_ht = int(h_str.split('-')[0]) if '-' in s else 0, 0
+                h_ht, a_ht = int(s.split('-')[0]), int(s.split('-')[1])
+                ht_total = h_ht + a_ht
+                if h_ht > 0 and a_ht > 0:
+                    ht_p['btts_si'] = 1.0
+                    ht_p['btts_no'] = 0.0
+                if ht_total >= 2:
+                    ht_p['over_1_5'] = 1.0
+                    ht_p['under_1_5'] = 0.0
+                if ht_total >= 3:
+                    ht_p['over_2_5'] = 1.0
+                    ht_p['under_2_5'] = 0.0
+                if ht_total >= 4:
+                    ht_p['over_3_5'] = 1.0
+                    ht_p['under_3_5'] = 0.0
                 by_pg_ht[pg_key][s] = ht_p
         leagues_out[lg] = {
             'n': len(rows_lg),
@@ -228,7 +247,7 @@ def _build_eg_data(query_fn):
     }
 
 
-# ─────────────────── Advanced predictor (minute + score, FT + 2H) ───────────────────
+# âââââââââââââââââââ Advanced predictor (minute + score, FT + 2H) âââââââââââââââââââ
 
 def _build_adv_data(query_fn):
     rows = query_fn("""
@@ -318,7 +337,7 @@ def _build_adv_data(query_fn):
     }
 
 
-# ─────────────────── Registrazione route ───────────────────
+# âââââââââââââââââââ Registrazione route âââââââââââââââââââ
 
 def register(app, query_fn):
     """Registra le route ML sull'app Flask."""
