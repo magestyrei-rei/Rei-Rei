@@ -710,6 +710,18 @@ def api_ingest():
     return jsonify({"ok": True, "inserted": True,
                     "match": f"{home_team} {ft_home}-{ft_away} {away_team}"})
 
+@app.route("/api/admin/delete-fixture", methods=["DELETE"])
+def admin_delete_fixture():
+    expected_token = os.environ.get("INGEST_TOKEN", "")
+    received_token = request.headers.get("X-Ingest-Token", "")
+    if not expected_token or not hmac.compare_digest(received_token, expected_token):
+        return jsonify({"error": "unauthorized"}), 401
+    fixture_id = request.args.get("fixture_id", type=int)
+    if fixture_id is None:
+        return jsonify({"error": "missing fixture_id"}), 400
+    execute("DELETE FROM matches WHERE fixture_id=?", (fixture_id,))
+    return jsonify({"ok": True, "deleted_fixture_id": fixture_id})
+
 if __name__ == '__main__':
     # Auto-migrazione se il DB ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨ assente o vuoto
     if not DB_PATH.exists() or not tables_exist():
