@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, Response
 import ml
+import hmac
 
 try:
     import requests as req_lib
@@ -579,6 +580,11 @@ def init_db():
             with open(DB_PATH, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
         print(f"  ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ football.db ripristinato ({DB_PATH.stat().st_size // 1024} KB)")
+    # Aggiunge colonna fixture_id se non esiste
+    try:
+        execute("ALTER TABLE matches ADD COLUMN fixture_id INTEGER")
+    except Exception:
+        pass
 
 # Eseguito sia da gunicorn che da python app.py
 init_db()
@@ -589,6 +595,120 @@ ml.register(app, query)
 _poll_thread = threading.Thread(target=poll_loop, daemon=True)
 _poll_thread.start()
 
+
+# ── INGEST ENDPOINT ────────────────────────────────────────────────────────────────────────────
+def _build_goals_html_ingest(goals):
+    parts = []
+    for g in goals:
+        team = g.get("team", "home")
+        minute = g.get("min", g.get("minute", g.get("elapsed", 0)))
+        player = g.get("player", g.get("scorer", "N/D"))
+        side = "home" if team in ("home", "casa") else "away"
+        parts.append(f'<span class="goal-{side}">{minute}\' {player}</span>')
+    return " ".join(parts)
+
+def _build_goals_text_ingest(goals):
+    parts = []
+    for g in goals:
+        team = g.get("team", "home")
+        minute = g.get("min", g.get("minute", g.get("elapsed", 0)))
+        player = g.get("player", g.get("scorer", "N/D"))
+        side = "H" if team in ("home", "casa") else "A"
+        parts.append(f"{minute}' {player} ({side})")
+    return ", ".join(parts)
+
+def _fg_result_ingest(fg_team, ft_home, ft_away):
+    if fg_team == "home":
+        if ft_home > ft_away: return "W"
+        elif ft_home == ft_away: return "D"
+        else: return "L"
+    else:
+        if ft_away > ft_home: return "W"
+        elif ft_away == ft_home: return "D"
+        else: return "L"
+
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    expected_token = os.environ.get("INGEST_TOKEN", "")
+    received_token = request.headers.get("X-Ingest-Token", "")
+    if not expected_token:
+        return jsonify({"error": "INGEST_TOKEN not set"}), 500
+    if not hmac.compare_digest(received_token, expected_token):
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(force=True) or {}
+
+    required = ["league_id", "league_name", "season", "date_str",
+                "home_team", "away_team", "ft_home", "ft_away",
+                "first_goal_min", "first_goal_team"]
+    for field in required:
+        if data.get(field) is None:
+            return jsonify({"error": f"missing field: {field}"}), 400
+
+    fg_min = int(data["first_goal_min"])
+    if fg_min > 16:
+        return jsonify({"error": "first_goal_min must be <= 16"}), 400
+
+    fixture_id = data.get("fixture_id")
+    if fixture_id:
+        existing = query("SELECT id FROM matches WHERE fixture_id=?", (int(fixture_id),))
+        if existing:
+            return jsonify({"ok": True, "inserted": False, "reason": "duplicate"})
+
+    league_id  = int(data["league_id"])
+    league_name = str(data["league_name"])
+    season     = int(data["season"])
+    date_str   = str(data["date_str"])
+    time_str   = str(data.get("time_str", ""))
+    home_team  = str(data["home_team"])
+    away_team  = str(data["away_team"])
+    ht_home    = int(data.get("ht_home", 0))
+    ht_away    = int(data.get("ht_away", 0))
+    ft_home    = int(data["ft_home"])
+    ft_away    = int(data["ft_away"])
+    st_home    = ft_home - ht_home
+    st_away    = ft_away - ht_away
+    total_goals = ft_home + ft_away
+    ht_goals   = ht_home + ht_away
+    st_goals   = st_home + st_away
+    btts       = 1 if ft_home > 0 and ft_away > 0 else 0
+    result     = "H" if ft_home > ft_away else ("D" if ft_home == ft_away else "A")
+    fg_team    = str(data["first_goal_team"])
+    fg_result  = _fg_result_ingest(fg_team, ft_home, ft_away)
+    goals_list = data.get("goals", [])
+    goals_html = _build_goals_html_ingest(goals_list)
+    goals_text = _build_goals_text_ingest(goals_list)
+
+    try:
+        from datetime import datetime as _dt
+        dt = _dt.strptime(f"{date_str} {time_str or '00:00'}", "%Y-%m-%d %H:%M")
+        sort_date = dt.strftime("%Y%m%d%H%M")
+    except Exception:
+        sort_date = date_str.replace("-", "") + "0000"
+
+    existing_league = query("SELECT id FROM leagues WHERE id=?", (league_id,))
+    if not existing_league:
+        try:
+            execute("INSERT OR IGNORE INTO leagues (id, name) VALUES (?,?)", (league_id, league_name))
+        except Exception:
+            pass
+
+    execute("""
+        INSERT INTO matches (
+            fixture_id, league_id, season, date_str, sort_date, time_str,
+            home_team, away_team, ht_home, ht_away, st_home, st_away,
+            ft_home, ft_away, total_goals, ht_goals, st_goals,
+            btts, result, goals_html, goals_text,
+            first_goal_min, first_goal_team, fg_result, is_archived
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+    """, (fixture_id, league_id, season, date_str, sort_date, time_str,
+          home_team, away_team, ht_home, ht_away, st_home, st_away,
+          ft_home, ft_away, total_goals, ht_goals, st_goals,
+          btts, result, goals_html, goals_text,
+          fg_min, fg_team, fg_result))
+
+    return jsonify({"ok": True, "inserted": True,
+                    "match": f"{home_team} {ft_home}-{ft_away} {away_team}"})
 
 if __name__ == '__main__':
     # Auto-migrazione se il DB ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨ assente o vuoto
