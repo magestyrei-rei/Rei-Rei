@@ -212,7 +212,6 @@ def _build_eg_data(query_fn):
                 ht_p = _norm_1x2(_shrink(len(hms), _aggr(hms, _MK_FT), parent_pg, _MK_FT))
                 ht_p['n'] = len(hms)
                 # Correggi mercati che diventano certi dato il punteggio HT
-                h_ht, a_ht = int(h_str.split('-')[0]) if '-' in s else 0, 0
                 h_ht, a_ht = int(s.split('-')[0]), int(s.split('-')[1])
                 ht_total = h_ht + a_ht
                 if h_ht > 0 and a_ht > 0:
