@@ -132,7 +132,8 @@ def _aggr(ms, keys):
             out[k] = 0.0
         return out
     for k in keys:
-        out[k] = sum(m[k] for m in ms) / n
+        vals = [m[k] for m in ms if k in m]
+        out[k] = sum(vals) / len(vals) if vals else 0.0
     return out
 
 
