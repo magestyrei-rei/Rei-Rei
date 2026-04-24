@@ -163,7 +163,8 @@ def _build_eg_data(query_fn):
         SELECT l.name AS league, m.first_goal_team AS pg,
                m.ht_home AS ht_home, m.ht_away AS ht_away,
                m.ft_home AS ft_home, m.ft_away AS ft_away,
-               m.total_goals AS total_goals, m.btts AS btts, m.result AS result
+               m.total_goals AS total_goals, m.btts AS btts, m.result AS result,
+               m.st_home AS st_home, m.st_away AS st_away
         FROM matches m
         JOIN leagues l ON l.id = m.league_id
         WHERE m.ft_home IS NOT NULL AND m.ft_away IS NOT NULL
@@ -173,8 +174,11 @@ def _build_eg_data(query_fn):
     for r in rows:
         m = _ft_metrics(r)
         if m is not None:
+            m2 = _2h_metrics(r)
+            if m2 is not None:
+                m = {**m, **m2}
             per.append((r, m))
-    global_p = _norm_1x2(_aggr([m for _, m in per], _MK_FT))
+    global_p = _norm_1x2(_aggr([m for _, m in per], _MK_ALL))
     global_p.pop('n', None)
     by_league = {}
     for r, m in per:
@@ -182,7 +186,7 @@ def _build_eg_data(query_fn):
     leagues_out = {}
     for lg, rows_lg in by_league.items():
         ms = [m for _, m in rows_lg]
-        overall = _norm_1x2(_shrink(len(ms), _aggr(ms, _MK_FT), global_p, _MK_FT))
+        overall = _norm_1x2(_shrink(len(ms), _aggr(ms, _MK_ALL), global_p, _MK_ALL))
         overall['n'] = len(ms)
         by_pg = {}
         for pg_db, pg_key in (('home', 'casa'), ('away', 'ospite')):
