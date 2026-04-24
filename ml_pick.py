@@ -1,0 +1,490 @@
+# ml_pick.py - Live betting picks: combina modello ML + quote API-Football + Kelly
+# Modulo complementare a ml.py. Viene importato e registrato dentro register() di ml.py.
+#
+# Endpoints esposti:
+#   GET /api/ml-env-check            -> verifica che APISPORTS_KEY sia settata (non espone il valore)
+#   GET /api/ml-live-fixtures-af     -> partite live da API-Football (con league_id, minuto, score)
+#   GET /api/ml-odds-debug?fixture=X -> debug payload quote per una fixture
+#   GET /api/ml-pick?fixture=X&...   -> top pick con edge positivo + Kelly stake
+
+import os
+import json
+import time
+import re
+import urllib.request
+import urllib.parse
+from flask import jsonify, request
+
+APISPORTS_BASE = 'https://v3.football.api-sports.io'
+APISPORTS_KEY = os.getenv('APISPORTS_KEY', '')
+
+# Cache
+_ODDS_CACHE = {}         # {fixture_id: (ts, data)}
+_ODDS_TTL = 30           # secondi - quote live si muovono veloci
+_LIVE_FIX_CACHE = {'ts': 0, 'data': None}
+_LIVE_FIX_TTL = 45       # secondi
+
+# -------------------- API-Football helpers --------------------
+
+def _apisports_get(path, params=None):
+    if not APISPORTS_KEY:
+        return {'error': 'APISPORTS_KEY not set'}
+    url = APISPORTS_BASE + path
+    if params:
+        url += '?' + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={
+        'x-apisports-key': APISPORTS_KEY,
+        'Accept': 'application/json',
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            return json.loads(r.read().decode('utf-8'))
+    except Exception as e:
+        return {'error': str(e), 'url': url}
+
+
+def _get_live_odds(fixture_id):
+    now = time.time()
+    c = _ODDS_CACHE.get(fixture_id)
+    if c and now - c[0] < _ODDS_TTL:
+        return c[1]
+    data = _apisports_get('/odds/live', {'fixture': fixture_id})
+    _ODDS_CACHE[fixture_id] = (now, data)
+    return data
+
+
+def _get_live_fixtures_af():
+    now = time.time()
+    if _LIVE_FIX_CACHE['data'] is not None and (now - _LIVE_FIX_CACHE['ts']) < _LIVE_FIX_TTL:
+        return _LIVE_FIX_CACHE['data']
+    data = _apisports_get('/fixtures', {'live': 'all'})
+    _LIVE_FIX_CACHE['ts'] = now
+    _LIVE_FIX_CACHE['data'] = data
+    return data
+
+
+def _fixture_to_model_ctx(fixture_data):
+    """Estrae (fixture_id, league_id, league_name, country, minute, score) da payload API-Football."""
+    if not isinstance(fixture_data, dict):
+        return None
+    fx = fixture_data.get('fixture', {}) or {}
+    lg = fixture_data.get('league', {}) or {}
+    goals = fixture_data.get('goals', {}) or {}
+    teams = fixture_data.get('teams', {}) or {}
+    status = fx.get('status', {}) or {}
+    elapsed = status.get('elapsed')
+    if elapsed is None:
+        return None
+    return {
+        'fixture_id': fx.get('id'),
+        'league_id': lg.get('id'),
+        'league_name': lg.get('name'),
+        'country': lg.get('country'),
+        'minute': elapsed,
+        'status_short': status.get('short', ''),
+        'score_home': goals.get('home') if goals.get('home') is not None else 0,
+        'score_away': goals.get('away') if goals.get('away') is not None else 0,
+        'home': (teams.get('home') or {}).get('name'),
+        'away': (teams.get('away') or {}).get('name'),
+    }
+
+# -------------------- Market normalization --------------------
+
+# Mappa value (lowercase) -> side per Over/Under senza linea esplicita
+_OU_LINE_RE = re.compile(r'(over|under)\s*([0-9]+(?:\.[0-9]+)?)')
+_LINE_IN_NAME_RE = re.compile(r'([0-9]+(?:\.[0-9]+)?)')
+
+
+def _is_second_half(bet_name_lc):
+    keys = ['second half', '2nd half', '2nd-half', 'seconde', 'secondo tempo', 'ht-ft']
+    # NB: 'half time' può essere 1T, non 2T -> escluso
+    for k in keys:
+        if k in bet_name_lc:
+            return True
+    return False
+
+
+def _is_first_half(bet_name_lc):
+    # 1T markets (non ci interessano per ora, return None)
+    keys = ['first half', '1st half', '1st-half', 'primo tempo', 'half time']
+    # ma 'half time/full time' è un mercato diverso, esclude
+    if 'half time/full time' in bet_name_lc or 'halftime/fulltime' in bet_name_lc:
+        return False
+    for k in keys:
+        if k in bet_name_lc:
+            return True
+    return False
+
+
+def _norm_line(x):
+    """2.5 -> '2_5', 0.5 -> '0_5'"""
+    s = str(x).strip()
+    if '.' not in s:
+        s = s + '.5' if s.isdigit() else s
+    return s.replace('.', '_')
+
+
+def _normalize_af_market(bet_name, bet_value):
+    """Ritorna market_key del nostro modello, oppure None."""
+    if not bet_name:
+        return None
+    n = bet_name.lower().strip()
+    v = str(bet_value or '').lower().strip()
+
+    # Skip primo tempo (non nel modello)
+    if _is_first_half(n):
+        return None
+
+    is_2h = _is_second_half(n)
+    prefix = '2h_' if is_2h else ''
+
+    # --- 1X2 / Match Winner ---
+    if (('match winner' in n) or ('full time result' in n) or
+            (n in ('result', '1x2', 'match result', 'winner')) or
+            ('match goals' in n and is_2h)):
+        if v in ('home', '1', 'casa'):
+            return prefix + '1'
+        if v in ('draw', 'x', 'pareggio'):
+            return prefix + 'X'
+        if v in ('away', '2', 'ospite', 'trasferta'):
+            return prefix + '2'
+
+    # Second Half Winner variants
+    if is_2h and ('winner' in n or 'result' in n):
+        if v in ('home', '1'):
+            return prefix + '1'
+        if v in ('draw', 'x'):
+            return prefix + 'X'
+        if v in ('away', '2'):
+            return prefix + '2'
+
+    # --- Goals Over/Under ---
+    if 'over/under' in n or 'goals over' in n or 'goals under' in n or 'total goals' in n or \
+       ('goals' in n and ('over' in v or 'under' in v)):
+        # Caso 1: value contiene "over X.Y" o "under X.Y"
+        m = _OU_LINE_RE.search(v)
+        if m:
+            side = 'over' if m.group(1).startswith('over') else 'under'
+            return prefix + side + '_' + _norm_line(m.group(2))
+        # Caso 2: linea nel nome (es "Goals Over/Under - 2.5") e value = "Over"/"Under"
+        if v in ('over', 'under'):
+            lm = _LINE_IN_NAME_RE.search(n)
+            if lm:
+                return prefix + v + '_' + _norm_line(lm.group(1))
+
+    # --- Both Teams To Score (BTTS) ---
+    if 'both teams' in n or 'btts' in n or 'both teams to score' in n:
+        if v in ('yes', 'si', 'sì', '1'):
+            return prefix + 'btts_si'
+        if v in ('no', '0'):
+            return prefix + 'btts_no'
+
+    return None
+
+
+def _parse_odds_payload(data):
+    """Ritorna {market_key: {bookie_name_lower: quota_float}}"""
+    out = {}
+    if not isinstance(data, dict):
+        return out
+    for resp in data.get('response', []) or []:
+        for bk in resp.get('bookmakers', []) or []:
+            bk_name = (bk.get('name') or '').lower().strip()
+            if not bk_name:
+                continue
+            for bet in bk.get('bets', []) or []:
+                bet_name = bet.get('name', '')
+                for vd in bet.get('values', []) or []:
+                    mkt = _normalize_af_market(bet_name, vd.get('value', ''))
+                    if not mkt:
+                        continue
+                    try:
+                        q = float(vd.get('odd', 0))
+                    except (ValueError, TypeError):
+                        continue
+                    if q > 1.0:
+                        out.setdefault(mkt, {})[bk_name] = q
+    return out
+
+# -------------------- Model lookup helpers --------------------
+
+def _pick_snapshot(minute):
+    """Snapshot disponibili: 45, 60, 70, 80."""
+    if minute <= 52:
+        return '45'
+    if minute <= 65:
+        return '60'
+    if minute <= 75:
+        return '70'
+    return '80'
+
+
+def _score_bucket(h, a, cap=3):
+    h = min(int(h), cap)
+    a = min(int(a), cap)
+    return '%d-%d' % (h, a)
+
+
+def _find_league_in_model(adv_data, league_id, league_name, country):
+    """Cerca la league nel dict adv_data['leagues']. Chiavi sono nomi composti tipo 'Italy - Serie A'."""
+    leagues = (adv_data or {}).get('leagues') or {}
+    if not leagues:
+        return None, None
+
+    # 1. Match esatto sulla chiave composta
+    if country and league_name:
+        key = '%s - %s' % (country, league_name)
+        if key in leagues:
+            return key, leagues[key]
+
+    # 2. Match esatto su league_name
+    if league_name and league_name in leagues:
+        return league_name, leagues[league_name]
+
+    # 3. Sub-string match (case-insensitive) su league_name
+    if league_name:
+        ln_lc = league_name.lower()
+        for k, v in leagues.items():
+            if ln_lc in k.lower():
+                return k, v
+
+    # 4. Country + partial league_name
+    if country and league_name:
+        c_lc = country.lower()
+        ln_lc = league_name.lower()
+        for k, v in leagues.items():
+            k_lc = k.lower()
+            if c_lc in k_lc and ln_lc.split()[0] in k_lc:
+                return k, v
+
+    return None, None
+
+
+def _extract_probs(league_data, minute, score_home, score_away):
+    """
+    Ritorna (probs_dict, source_label).
+    Fallback: bucket(minute,score) -> snapshot overall -> league overall.
+    """
+    if not isinstance(league_data, dict):
+        return {}, 'none'
+    by_minute = league_data.get('by_minute') or league_data.get('snapshots') or {}
+    snap = _pick_snapshot(minute)
+    sk = _score_bucket(score_home, score_away)
+
+    snap_data = by_minute.get(snap)
+    if isinstance(snap_data, dict):
+        # bucket score
+        probs = snap_data.get(sk)
+        if isinstance(probs, dict) and probs:
+            return probs, 'league+min%s+score%s' % (snap, sk)
+        # aggregate di questo snapshot (se presente come 'overall' o fallback)
+        if 'overall' in snap_data and isinstance(snap_data['overall'], dict):
+            return snap_data['overall'], 'league+min%s+overall' % snap
+
+    overall = league_data.get('overall')
+    if isinstance(overall, dict):
+        return overall, 'league-overall'
+    return {}, 'none'
+
+# -------------------- Kelly + edge --------------------
+
+def _compute_picks(model_probs, odds_by_market, bookie_pref, kelly_mult, edge_min, stake_max, capital):
+    """Lista pick con edge positivo, ordinata per edge desc."""
+    if not isinstance(model_probs, dict) or not isinstance(odds_by_market, dict):
+        return []
+    picks = []
+    fallback_order = [bookie_pref, 'betfair', 'pinnacle', 'pinnacle sports', 'bet365', '1xbet', 'marathonbet', 'unibet']
+    for mkt, prob in model_probs.items():
+        if mkt == 'n' or not isinstance(prob, (int, float)):
+            continue
+        if prob <= 0.0 or prob >= 1.0:
+            continue
+        offers = odds_by_market.get(mkt)
+        if not offers:
+            continue
+        chosen_bookie = None
+        chosen_quota = None
+        for b in fallback_order:
+            if b and b in offers:
+                chosen_bookie = b
+                chosen_quota = offers[b]
+                break
+        if chosen_quota is None:
+            chosen_bookie = max(offers, key=lambda k: offers[k])
+            chosen_quota = offers[chosen_bookie]
+        if chosen_quota is None or chosen_quota <= 1.0:
+            continue
+
+        edge = prob * chosen_quota - 1.0
+        if edge < edge_min:
+            continue
+
+        b = chosen_quota - 1.0
+        q = 1.0 - prob
+        if b <= 0:
+            continue
+        f_star = (b * prob - q) / b
+        if f_star <= 0:
+            continue
+        f_scaled = min(f_star * kelly_mult, stake_max)
+        stake_eur = round(capital * f_scaled, 2)
+
+        picks.append({
+            'market': mkt,
+            'model_prob': round(prob, 4),
+            'bookie': chosen_bookie,
+            'quota': round(chosen_quota, 3),
+            'implied_prob': round(1.0 / chosen_quota, 4),
+            'edge': round(edge, 4),
+            'edge_pct': round(edge * 100.0, 2),
+            'kelly_raw': round(f_star, 4),
+            'stake_pct': round(f_scaled, 4),
+            'stake_eur': stake_eur,
+            'alt_bookies': {k: round(v, 3) for k, v in offers.items() if k != chosen_bookie},
+        })
+    picks.sort(key=lambda p: p['edge'], reverse=True)
+    return picks
+
+# -------------------- Route registration --------------------
+
+def register(app, adv_data_provider):
+    """
+    Registra le route di ml_pick sull'app Flask.
+    adv_data_provider: callable -> dict (ritorna _ML_CACHE['adv_data'] pronto, buildandolo se serve).
+    """
+
+    @app.route('/api/ml-env-check')
+    def api_ml_env_check():
+        """Verifica presenza APISPORTS_KEY senza esporre il valore."""
+        return jsonify({
+            'apisports_key_set': bool(APISPORTS_KEY),
+            'apisports_key_len': len(APISPORTS_KEY) if APISPORTS_KEY else 0,
+            'apisports_base': APISPORTS_BASE,
+        })
+
+    @app.route('/api/ml-live-fixtures-af')
+    def api_ml_live_fixtures_af():
+        """Lista partite live (da API-Football)."""
+        data = _get_live_fixtures_af()
+        if not isinstance(data, dict):
+            return jsonify({'error': 'bad response'}), 502
+        if 'error' in data:
+            return jsonify({'error': data.get('error'), 'details': data}), 502
+        out = []
+        for f in data.get('response', []) or []:
+            ctx = _fixture_to_model_ctx(f)
+            if ctx:
+                out.append(ctx)
+        return jsonify({
+            'fixtures': out,
+            'count': len(out),
+            'updated_at': int(time.time()),
+            'api_errors': data.get('errors') or None,
+        })
+
+    @app.route('/api/ml-odds-debug')
+    def api_ml_odds_debug():
+        """Debug: quote raw + parsing per una fixture."""
+        fixture = request.args.get('fixture', type=int)
+        if not fixture:
+            return jsonify({'error': 'missing fixture param'}), 400
+        data = _get_live_odds(fixture)
+        parsed = _parse_odds_payload(data) if isinstance(data, dict) else {}
+        bookies = set()
+        bet_names = set()
+        resps = (data.get('response') or []) if isinstance(data, dict) else []
+        for r in resps:
+            for b in r.get('bookmakers', []) or []:
+                bookies.add(b.get('name', ''))
+                for bt in b.get('bets', []) or []:
+                    bet_names.add(bt.get('name', ''))
+        return jsonify({
+            'fixture': fixture,
+            'response_count': len(resps),
+            'bookies_seen': sorted(list(bookies)),
+            'bet_names_seen': sorted(list(bet_names)),
+            'n_markets_parsed': len(parsed),
+            'parsed_markets': parsed,
+            'api_errors': (data.get('errors') if isinstance(data, dict) else None),
+        })
+
+    @app.route('/api/ml-pick')
+    def api_ml_pick():
+        """
+        Calcola top pick con edge positivo + Kelly per una fixture live.
+        Params:
+          fixture  (int, required): id fixture API-Football
+          bookie   (str, default 'betfair'): bookie preferito per edge
+          kelly    (float, default 0.25): frazione Kelly
+          edge_min (float, default 0.03): edge minimo 3%
+          stake_max(float, default 0.05): cap stake 5%
+          capital  (float, default 1000): bankroll EUR
+        """
+        fixture = request.args.get('fixture', type=int)
+        if not fixture:
+            return jsonify({'error': 'missing fixture param'}), 400
+        bookie = (request.args.get('bookie') or 'betfair').lower().strip()
+        kelly_mult = request.args.get('kelly', default=0.25, type=float)
+        edge_min = request.args.get('edge_min', default=0.03, type=float)
+        stake_max = request.args.get('stake_max', default=0.05, type=float)
+        capital = request.args.get('capital', default=1000.0, type=float)
+
+        # 1) Fixture live
+        live_data = _get_live_fixtures_af()
+        ctx = None
+        if isinstance(live_data, dict):
+            for f in (live_data.get('response') or []):
+                if ((f.get('fixture') or {}).get('id')) == fixture:
+                    ctx = _fixture_to_model_ctx(f)
+                    break
+        if not ctx:
+            return jsonify({
+                'error': 'fixture not live or not found',
+                'fixture': fixture,
+                'picks': [],
+            }), 404
+
+        # 2) Model data
+        try:
+            adv_data = adv_data_provider()
+        except Exception as e:
+            return jsonify({'error': 'model data unavailable: ' + str(e)}), 500
+        lg_key, lg_data = _find_league_in_model(
+            adv_data, ctx['league_id'], ctx['league_name'], ctx['country']
+        )
+        if not lg_data:
+            return jsonify({
+                'warning': 'league not covered by model',
+                'league_id': ctx['league_id'],
+                'league_name': ctx['league_name'],
+                'country': ctx['country'],
+                'ctx': ctx,
+                'picks': [],
+                'available_leagues_sample': list((adv_data.get('leagues') or {}).keys())[:10],
+            })
+
+        # 3) Model probs
+        probs, source = _extract_probs(lg_data, ctx['minute'], ctx['score_home'], ctx['score_away'])
+
+        # 4) Live odds
+        odds_data = _get_live_odds(fixture)
+        odds_by_market = _parse_odds_payload(odds_data) if isinstance(odds_data, dict) else {}
+
+        # 5) Compute picks
+        picks = _compute_picks(probs, odds_by_market, bookie, kelly_mult, edge_min, stake_max, capital)
+
+        return jsonify({
+            'fixture': fixture,
+            'ctx': ctx,
+            'model_league_key': lg_key,
+            'model_source': source,
+            'n_markets_with_odds': len(odds_by_market),
+            'params': {
+                'bookie_pref': bookie,
+                'kelly': kelly_mult,
+                'edge_min': edge_min,
+                'stake_max': stake_max,
+                'capital': capital,
+            },
+            'picks': picks,
+        })
