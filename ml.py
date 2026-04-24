@@ -5,6 +5,7 @@ from datetime import datetime
 import time
 import re
 import ml_pick  # live betting picks: API-Football odds + Kelly
+import odds_logger  # live odds snapshot logger for historical dataset
 
 _ML_CACHE = {'eg_data': None, 'eg_ts': 0, 'adv_data': None, 'adv_ts': 0}
 _ML_TTL = 600  # 10 minuti
@@ -381,3 +382,5 @@ def register(app, query_fn):
     # Registra le route di ml_pick: /api/ml-env-check, /api/ml-live-fixtures-af,
     # /api/ml-odds-debug, /api/ml-pick
     ml_pick.register(app, _get_adv_data)
+    # Registra le route di odds_logger: /api/odds-logger-tick, -stats, -dump, -csv, -ddl
+    odds_logger.register(app)
