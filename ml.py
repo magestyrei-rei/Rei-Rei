@@ -4,6 +4,7 @@ from flask import jsonify, send_from_directory, request
 from datetime import datetime
 import time
 import re
+import ml_pick  # live betting picks: API-Football odds + Kelly
 
 _ML_CACHE = {'eg_data': None, 'eg_ts': 0, 'adv_data': None, 'adv_ts': 0}
 _ML_TTL = 600  # 10 minuti
@@ -368,3 +369,15 @@ def register(app, query_fn):
             _ML_CACHE['adv_data'] = _build_adv_data(query_fn)
             _ML_CACHE['adv_ts'] = now
         return jsonify(_ML_CACHE['adv_data'])
+
+    def _get_adv_data():
+        """Provider usato da ml_pick: ritorna adv_data con la stessa cache di /api/ml-advanced."""
+        now = time.time()
+        if _ML_CACHE['adv_data'] is None or (now - _ML_CACHE['adv_ts']) > _ML_TTL:
+            _ML_CACHE['adv_data'] = _build_adv_data(query_fn)
+            _ML_CACHE['adv_ts'] = now
+        return _ML_CACHE['adv_data']
+
+    # Registra le route di ml_pick: /api/ml-env-check, /api/ml-live-fixtures-af,
+    # /api/ml-odds-debug, /api/ml-pick
+    ml_pick.register(app, _get_adv_data)
