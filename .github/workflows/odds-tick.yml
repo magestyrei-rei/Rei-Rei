@@ -1,0 +1,23 @@
+name: Odds Logger Tick
+
+on:
+  schedule:
+    # Every 5 minutes (GitHub Actions cron minimum granularity)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hit odds-logger-tick endpoint
+        env:
+          TICK_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
+        run: |
+          set -e
+          URL="https://rei-rei.onrender.com/api/odds-logger-tick?token=${TICK_TOKEN}"
+          # Render free tier sleeps after 15 min idle - allow extra time on cold start
+          RESPONSE=$(curl -fsSL --max-time 120 --retry 3 --retry-delay 10 "$URL")
+          echo "Response:"
+          echo "$RESPONSE" | head -c 2000
