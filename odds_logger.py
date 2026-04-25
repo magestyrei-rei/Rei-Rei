@@ -28,6 +28,9 @@ ODDS_BACKEND = os.getenv('ODDS_BACKEND', 'memory').lower()   # memory | supabase
 SUPABASE_URL = os.getenv('SUPABASE_URL', '').rstrip('/')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', '')
 TURSO_URL = os.getenv('TURSO_URL', '').rstrip('/')
+# Accept libsql:// scheme (native Turso) by mapping to https:// for HTTP /v2/pipeline API
+if TURSO_URL.startswith('libsql://'):
+    TURSO_URL = 'https://' + TURSO_URL[len('libsql://'):]
 TURSO_TOKEN = os.getenv('TURSO_TOKEN', '')
 TICK_AUTH_TOKEN = os.getenv('TICK_AUTH_TOKEN', '')   # condiviso col cron esterno per proteggere /tick
 LOGGER_MAX_FIXTURES = int(os.getenv('LOGGER_MAX_FIXTURES', '40'))   # safety: max fixture per tick
