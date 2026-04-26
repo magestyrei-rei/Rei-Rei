@@ -541,6 +541,12 @@ def register(app):
             ml_poisson.maybe_recalibrate(min_interval_hours=6)
         except Exception:
             pass
+        # Auto-trigger settlement (best-effort, non blocca il tick)
+        try:
+            import predictions_settlement
+            predictions_settlement.maybe_settle(min_interval_min=30, limit=20)
+        except Exception:
+            pass
         return jsonify(result)
 
     @app.route('/api/odds-logger-stats')
