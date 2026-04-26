@@ -23,7 +23,16 @@ from flask import jsonify, request, current_app
 
 
 # ---------- config ----------
-TURSO_URL = os.getenv('TURSO_URL', '').rstrip('/')
+def _normalize_turso_url(u):
+    if not u:
+        return ''
+    u = u.rstrip('/')
+    if u.startswith('libsql://'):
+        u = 'https://' + u[len('libsql://'):]
+    return u
+
+
+TURSO_URL = _normalize_turso_url(os.getenv('TURSO_URL', ''))
 TURSO_TOKEN = os.getenv('TURSO_TOKEN', '')
 INGEST_TOKEN = os.getenv('INGEST_TOKEN', '')
 APISPORTS_KEY = os.getenv('APISPORTS_KEY', '')
