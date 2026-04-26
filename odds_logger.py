@@ -535,6 +535,12 @@ def register(app):
             if tok != TICK_AUTH_TOKEN:
                 return jsonify({'error': 'unauthorized'}), 401
         result = do_tick()
+        # Auto-trigger recalibrazione Poisson (best-effort, non blocca il tick)
+        try:
+            import ml_poisson
+            ml_poisson.maybe_recalibrate(min_interval_hours=6)
+        except Exception:
+            pass
         return jsonify(result)
 
     @app.route('/api/odds-logger-stats')
