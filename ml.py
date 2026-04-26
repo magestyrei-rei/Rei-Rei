@@ -6,6 +6,7 @@ import time
 import re
 import ml_pick  # live betting picks: API-Football odds + Kelly
 import odds_logger  # live odds snapshot logger for historical dataset
+import ml_poisson  # Poisson bivariate live engine: correct score, HTS/ATS, mercati gol
 
 _ML_CACHE = {'eg_data': None, 'eg_ts': 0, 'adv_data': None, 'adv_ts': 0}
 _ML_TTL = 600  # 10 minuti
@@ -384,3 +385,4 @@ def register(app, query_fn):
     ml_pick.register(app, _get_adv_data)
     # Registra le route di odds_logger: /api/odds-logger-tick, -stats, -dump, -csv, -ddl
     odds_logger.register(app)
+    ml_poisson.register(app)  # /api/ml-poisson, /api/ml-calibration-status, /api/ml-recalibrate
