@@ -26,6 +26,7 @@
 #   - get_calibration_status() -> per UI di monitoraggio
 
 import math
+import time
 import os
 import json
 import urllib.request
@@ -351,6 +352,19 @@ def calibrate_from_turso():
         len(new_league_lambda), len(new_team_att), samples_filtered)
     return _CALIB_STATE
 
+
+def maybe_recalibrate(min_interval_hours=6):
+    """Auto-trigger calibrate_from_turso() solo se sono passate >= min_interval_hours dall'ultima esecuzione.
+    Best-effort: cattura tutte le eccezioni, non blocca il caller (es. odds_logger tick).
+    """
+    try:
+        last_ts = _CALIB_STATE.get('last_run_ts', 0) or 0
+        elapsed = time.time() - last_ts
+        if last_ts > 0 and elapsed < min_interval_hours * 3600:
+            return {'skipped': True, 'reason': 'too soon', 'elapsed_h': round(elapsed/3600, 2)}
+        return calibrate_from_turso()
+    except Exception as e:
+        return {'error': str(e)[:200]}
 
 # ----- Flask routes (registrate da app.py) -----
 
