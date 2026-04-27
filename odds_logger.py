@@ -554,15 +554,31 @@ def register(app):
         """Debug: ispeziona la chain live-fixtures \u2192 live-odds \u2192 parser per UN fixture."""
         try:
             import ml_pick
+            bare = request.args.get('bare', '0') == '1'
+            if bare:
+                # Diagnostica plan API-Football: chiama /odds/live SENZA filtro fixture
+                bare_data = ml_pick._apisports_get('/odds/live', {})
+                if not isinstance(bare_data, dict):
+                    return jsonify({'bare_error': str(bare_data)[:300]})
+                resp = bare_data.get('response') or []
+                bm_set = set()
+                bet_set = set()
+                for r0 in (resp[:5] if isinstance(resp, list) else []):
+                    for bm in (r0.get('bookmakers') or []):
+                        bm_set.add(bm.get('name'))
+                        for bet in (bm.get('bets') or []):
+                            bet_set.add(bet.get('name'))
+                return jsonify({
+                    'mode': 'bare',
+                    'bare_keys': list(bare_data.keys()),
+                    'bare_results': bare_data.get('results'),
+                    'bare_errors': bare_data.get('errors'),
+                    'response_len': len(resp) if isinstance(resp, list) else None,
+                    'first5_bookmakers': sorted(list(bm_set))[:20],
+                    'first5_bet_names': sorted(list(bet_set))[:30],
+                })
             live = ml_pick._get_live_fixtures_af()
             fixtures = (live.get('response') if isinstance(live, dict) else None) or []
-            if not fixtures:
-                return jsonify({
-                    'error': 'no live fixtures',
-                    'live_keys': list((live or {}).keys()) if isinstance(live, dict) else None,
-                    'live_results': (live or {}).get('results') if isinstance(live, dict) else None,
-                    'live_errors': (live or {}).get('errors') if isinstance(live, dict) else None,
-                })
             fid_arg = request.args.get('fixture')
             target = None
             if fid_arg:
@@ -572,6 +588,53 @@ def register(app):
                 except Exception:
                     target = None
             if target is None:
+                if not fixtures:
+                    if fid_arg:
+                        try:
+                            fid = int(fid_arg)
+                        except Exception:
+                            return jsonify({'error': 'invalid fixture arg'})
+                        odds = ml_pick._get_live_odds(fid)
+                        parsed = ml_pick._parse_odds_payload(odds) if isinstance(odds, dict) else {}
+                        response = (odds or {}).get('response') if isinstance(odds, dict) else None
+                        shape = {
+                            'odds_keys': list((odds or {}).keys()) if isinstance(odds, dict) else None,
+                            'odds_results': (odds or {}).get('results') if isinstance(odds, dict) else None,
+                            'odds_errors': (odds or {}).get('errors') if isinstance(odds, dict) else None,
+                            'response_len': len(response) if isinstance(response, list) else None,
+                        }
+                        sample_raw = None
+                        if isinstance(response, list) and response:
+                            r0 = response[0] or {}
+                            bms = r0.get('bookmakers') or []
+                            shape['bookmakers_count'] = len(bms)
+                            shape['bm_names'] = [b.get('name') for b in bms[:6]]
+                            if bms:
+                                bm0 = bms[0]
+                                bets = bm0.get('bets') or []
+                                shape['first_bm_bets_count'] = len(bets)
+                                shape['first_bm_bet_names'] = [b.get('name') for b in bets[:30]]
+                                if bets:
+                                    sample_raw = {
+                                        'bm': bm0.get('name'),
+                                        'bet0_name': bets[0].get('name'),
+                                        'bet0_values': bets[0].get('values'),
+                                    }
+                        return jsonify({
+                            'fid': fid,
+                            'mode': 'forced',
+                            'shape': shape,
+                            'parsed_markets': list(parsed.keys()) if isinstance(parsed, dict) else None,
+                            'parsed_count': sum(len(v or {}) for v in (parsed or {}).values()) if isinstance(parsed, dict) else 0,
+                            'sample_raw': sample_raw,
+                        })
+                    return jsonify({
+                        'error': 'no live fixtures',
+                        'live_keys': list((live or {}).keys()) if isinstance(live, dict) else None,
+                        'live_results': (live or {}).get('results') if isinstance(live, dict) else None,
+                        'live_errors': (live or {}).get('errors') if isinstance(live, dict) else None,
+                        'hint': 'pass ?fixture=NNN per forzare probe, oppure ?bare=1 per /odds/live globale',
+                    })
                 target = fixtures[0]
             fid = (target.get('fixture') or {}).get('id')
             try:
