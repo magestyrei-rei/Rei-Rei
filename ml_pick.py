@@ -124,70 +124,124 @@ def _norm_line(x):
     return s.replace('.', '_')
 
 
-def _normalize_af_market(bet_name, bet_value):
-    """Ritorna market_key del nostro modello, oppure None."""
+def _normalize_af_market(bet_name, bet_value, handicap=None):
+    """Ritorna market_key del nostro modello, oppure None.
+    Supporta sia schema /odds (pre-match) sia /odds/live (in-play, line in 'handicap')."""
     if not bet_name:
         return None
     n = bet_name.lower().strip()
     v = str(bet_value or '').lower().strip()
+    h = None
+    if handicap is not None and str(handicap).strip() not in ('', 'None'):
+        h = str(handicap).strip()
 
-    # Skip primo tempo (non nel modello)
-    if _is_first_half(n):
-        return None
-
+    # Determina prefisso (1h_ / 2h_ / vuoto)
+    is_1h = _is_first_half(n)
     is_2h = _is_second_half(n)
-    prefix = '2h_' if is_2h else ''
+    if is_1h:
+        prefix = '1h_'
+    elif is_2h:
+        prefix = '2h_'
+    else:
+        prefix = ''
 
-    # --- 1X2 / Match Winner ---
-    if (('match winner' in n) or ('full time result' in n) or
-            (n in ('result', '1x2', 'match result', 'winner')) or
-            ('match goals' in n and is_2h)):
-        if v in ('home', '1', 'casa'):
-            return prefix + '1'
-        if v in ('draw', 'x', 'pareggio'):
-            return prefix + 'X'
-        if v in ('away', '2', 'ospite', 'trasferta'):
-            return prefix + '2'
+    # ============ Time-windowed 1X2: "1x2 - 30 minutes" ============
+    import re as _re
+    tm = _re.match(r'1x2\s*-\s*(\d+)\s*minutes?', n)
+    if tm:
+        mins = tm.group(1)
+        if v in ('home', '1'): return 't' + mins + '_1'
+        if v in ('draw', 'x'): return 't' + mins + '_X'
+        if v in ('away', '2'): return 't' + mins + '_2'
 
-    # Second Half Winner variants
+    # ============ 1X2 / Match Result ============
+    if (('match winner' in n) or ('fulltime result' in n) or ('full time result' in n) or
+            (n.startswith('1x2') and '-' not in n) or
+            (n in ('result', '1x2', 'match result', 'winner'))):
+        if v in ('home', '1', 'casa'): return prefix + '1'
+        if v in ('draw', 'x', 'pareggio'): return prefix + 'X'
+        if v in ('away', '2'): return prefix + '2'
+
+    # ============ Second Half Winner generico ============
     if is_2h and ('winner' in n or 'result' in n):
-        if v in ('home', '1'):
-            return prefix + '1'
-        if v in ('draw', 'x'):
-            return prefix + 'X'
-        if v in ('away', '2'):
-            return prefix + '2'
+        if v in ('home', '1'): return prefix + '1'
+        if v in ('draw', 'x'): return prefix + 'X'
+        if v in ('away', '2'): return prefix + '2'
 
-    # --- Goals Over/Under ---
-    if 'over/under' in n or 'goals over' in n or 'goals under' in n or 'total goals' in n or \
-       ('goals' in n and ('over' in v or 'under' in v)):
-        # Caso 1: value contiene "over X.Y" o "under X.Y"
-        m = _OU_LINE_RE.search(v)
-        if m:
-            side = 'over' if m.group(1).startswith('over') else 'under'
-            return prefix + side + '_' + _norm_line(m.group(2))
-        # Caso 2: linea nel nome (es "Goals Over/Under - 2.5") e value = "Over"/"Under"
-        if v in ('over', 'under'):
-            lm = _LINE_IN_NAME_RE.search(n)
-            if lm:
-                return prefix + v + '_' + _norm_line(lm.group(1))
+    # ============ Double Chance ============
+    if 'double chance' in n:
+        if v in ('home or draw', '1x', '1 or x'): return prefix + 'dc_1X'
+        if v in ('home or away', '12', '1 or 2'): return prefix + 'dc_12'
+        if v in ('away or draw', 'x2', 'x or 2'): return prefix + 'dc_X2'
 
-    # --- Both Teams To Score (BTTS) ---
-    if 'both teams' in n or 'btts' in n or 'both teams to score' in n:
-        if v in ('yes', 'si', 'sì', '1'):
+    # ============ Draw No Bet ============
+    if 'draw no bet' in n:
+        if v in ('home', '1'): return prefix + 'dnb_1'
+        if v in ('away', '2'): return prefix + 'dnb_2'
+
+    # ============ Goals Over/Under (con handicap field) ============
+    if ('over/under' in n or 'over under' in n or 'goals over' in n or 'goals under' in n or
+            'total goals' in n or 'match goals' in n or
+            ('goals' in n and ('over' in v or 'under' in v))):
+        line = h
+        if not line:
+            mv = _OU_LINE_RE.search(v)
+            if mv:
+                line = mv.group(2)
+        if not line:
+            mn = _re.search(r'(\d+(?:[.,]\d+)?)', n)
+            if mn: line = mn.group(1)
+        if line:
+            if v == 'over' or v.startswith('over'):
+                return prefix + 'over_' + _norm_line(line)
+            if v == 'under' or v.startswith('under'):
+                return prefix + 'under_' + _norm_line(line)
+
+    # ============ BTTS ============
+    if 'both teams' in n or 'btts' in n:
+        if v in ('yes', 'si', 'si\u0301', '1'):
             return prefix + 'btts_si'
         if v in ('no', '0'):
             return prefix + 'btts_no'
 
+    # ============ Goals Odd/Even ============
+    if 'odd/even' in n and 'goals' in n or 'goals odd/even' in n:
+        if v == 'odd': return prefix + 'goals_odd'
+        if v == 'even': return prefix + 'goals_even'
+
+    # ============ Correct Score / Final Score / Exact Score ============
+    if 'final score' in n or 'correct score' in n or 'exact score' in n:
+        cs = _re.match(r'^(\d+)\s*[-:]\s*(\d+)$', v)
+        if cs:
+            return prefix + 'cs_' + cs.group(1) + '_' + cs.group(2)
+
+    # ============ How many goals will (Home/Away) Team score? ============
+    if 'how many goals' in n:
+        team = 'home' if 'home' in n else ('away' if 'away' in n else None)
+        if team:
+            if v == '1': return team + '_goals_1'
+            if v == '2': return team + '_goals_2'
+            if 'or more' in v or v == '3+' or v == '3 or more': return team + '_goals_3p'
+            if 'no goal' in v or v == '0': return team + '_goals_0'
+
+    # ============ Result / Both Teams To Score (combinato) ============
+    if 'result / both teams' in n or 'result/both teams' in n:
+        if '/' in v:
+            r, b = v.split('/', 1)
+            r = r.strip(); b = b.strip()
+            r_key = '1' if r == 'home' else ('X' if r == 'draw' else ('2' if r == 'away' else None))
+            b_key = 'si' if b in ('yes', 'si') else ('no' if b == 'no' else None)
+            if r_key and b_key:
+                return prefix + 'res_btts_' + r_key + '_' + b_key
+
     return None
-
-
 def _ingest_value(out, bet_name, vd, bk_name):
     """Helper: estrae la chiave mercato e la quota da un value entry, e la inserisce in out."""
     if vd.get('suspended') is True:
         return
     val = vd.get('value', '')
-    mkt = _normalize_af_market(bet_name, val)
+    handicap = vd.get('handicap')
+    mkt = _normalize_af_market(bet_name, val, handicap=handicap)
     if not mkt:
         return
     try:
