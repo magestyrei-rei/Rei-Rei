@@ -641,6 +641,11 @@ def register(app):
             if bare:
                 # Diagnostica plan API-Football: chiama /odds/live SENZA filtro fixture
                 bare_data = ml_pick._apisports_get('/odds/live', {})
+                # Dump first item raw shape to understand
+                if isinstance(bare_data, dict):
+                    rsp0 = (bare_data.get('response') or [None])[0]
+                    if rsp0 is not None:
+                        return jsonify({'mode': 'bare_dump', 'first_item_keys': list(rsp0.keys()), 'first_item_sample': {k: (str(rsp0.get(k))[:300] if not isinstance(rsp0.get(k), (list, dict)) else (rsp0.get(k)[:1] if isinstance(rsp0.get(k), list) else rsp0.get(k))) for k in rsp0.keys()}, 'results': bare_data.get('results')})
                 if not isinstance(bare_data, dict):
                     return jsonify({'bare_error': str(bare_data)[:300]})
                 resp = bare_data.get('response') or []
