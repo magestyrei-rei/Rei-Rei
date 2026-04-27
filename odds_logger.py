@@ -555,6 +555,10 @@ def register(app):
         try:
             import ml_pick
             bare = request.args.get('bare', '0') == '1'
+            status_only = request.args.get('status', '0') == '1'
+            if status_only:
+                st = ml_pick._apisports_get('/status', {})
+                return jsonify({'mode': 'status', 'status_response': st})
             if bare:
                 # Diagnostica plan API-Football: chiama /odds/live SENZA filtro fixture
                 bare_data = ml_pick._apisports_get('/odds/live', {})
