@@ -182,28 +182,59 @@ def _normalize_af_market(bet_name, bet_value):
     return None
 
 
+def _ingest_value(out, bet_name, vd, bk_name):
+    """Helper: estrae la chiave mercato e la quota da un value entry, e la inserisce in out."""
+    if vd.get('suspended') is True:
+        return
+    val = vd.get('value', '')
+    mkt = _normalize_af_market(bet_name, val)
+    if not mkt:
+        return
+    try:
+        q = float(vd.get('odd', vd.get('odds', 0)) or 0)
+    except (ValueError, TypeError):
+        return
+    if q > 1.0:
+        out.setdefault(mkt, {})[bk_name] = q
+
+
 def _parse_odds_payload(data):
-    """Ritorna {market_key: {bookie_name_lower: quota_float}}"""
+    """Ritorna {market_key: {bookie_name_lower: quota_float}}.
+    Supporta DUE schemi distinti di API-Football:
+      - Pre-match (/odds):  response[i].bookmakers[j].bets[k].values[m]
+      - Live in-play (/odds/live):  response[i].odds[k].values[m]   (no bookmakers, quote aggregate)
+    """
     out = {}
     if not isinstance(data, dict):
         return out
     for resp in data.get('response', []) or []:
-        for bk in resp.get('bookmakers', []) or []:
-            bk_name = (bk.get('name') or '').lower().strip()
-            if not bk_name:
+        if not isinstance(resp, dict):
+            continue
+        # --- Schema A: pre-match (bookmakers list) ---
+        bms = resp.get('bookmakers') or []
+        if bms:
+            for bk in bms:
+                bk_name = (bk.get('name') or '').lower().strip()
+                if not bk_name:
+                    continue
+                for bet in bk.get('bets', []) or []:
+                    bet_name = bet.get('name', '')
+                    for vd in bet.get('values', []) or []:
+                        _ingest_value(out, bet_name, vd, bk_name)
+            continue
+        # --- Schema B: live in-play (odds list direttamente) ---
+        live_bets = resp.get('odds') or []
+        if live_bets:
+            # Usa un nome bookmaker placeholder per le quote aggregate API-Football
+            bk_name = 'apifootball-live'
+            # Skip se la fixture/odds sono globalmente bloccate o sospese
+            st = resp.get('status') or {}
+            if st.get('blocked') or st.get('stopped'):
                 continue
-            for bet in bk.get('bets', []) or []:
+            for bet in live_bets:
                 bet_name = bet.get('name', '')
                 for vd in bet.get('values', []) or []:
-                    mkt = _normalize_af_market(bet_name, vd.get('value', ''))
-                    if not mkt:
-                        continue
-                    try:
-                        q = float(vd.get('odd', 0))
-                    except (ValueError, TypeError):
-                        continue
-                    if q > 1.0:
-                        out.setdefault(mkt, {})[bk_name] = q
+                    _ingest_value(out, bet_name, vd, bk_name)
     return out
 
 # -------------------- Model lookup helpers --------------------
