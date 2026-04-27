@@ -559,6 +559,31 @@ def register(app):
             if status_only:
                 st = ml_pick._apisports_get('/status', {})
                 return jsonify({'mode': 'status', 'status_response': st})
+            league_lookup = request.args.get('league_lookup')
+            if league_lookup:
+                ids = []
+                for x in league_lookup.split(','):
+                    x = x.strip()
+                    if x.isdigit():
+                        ids.append(int(x))
+                out = []
+                live_resp = ml_pick._apisports_get('/odds/live/leagues', {})
+                live_set = set()
+                if isinstance(live_resp, dict):
+                    for r in (live_resp.get('response') or []):
+                        lid = (r.get('league') or {}).get('id') or r.get('id')
+                        if lid is not None:
+                            live_set.add(int(lid))
+                for lid in ids:
+                    info = ml_pick._apisports_get('/leagues', {'id': lid})
+                    rsp = (info or {}).get('response') if isinstance(info, dict) else None
+                    name = None; country = None; ltype = None
+                    if isinstance(rsp, list) and rsp:
+                        lg = rsp[0].get('league') or {}
+                        ct = rsp[0].get('country') or {}
+                        name = lg.get('name'); country = ct.get('name'); ltype = lg.get('type')
+                    out.append({'id': lid, 'name': name, 'country': country, 'type': ltype, 'live_odds_covered': lid in live_set})
+                return jsonify({'mode': 'league_lookup', 'live_leagues_total': len(live_set), 'leagues': out})
             auto_premkt = request.args.get('auto_premkt', '0') == '1'
             if auto_premkt:
                 # Find an upcoming fixture today and run /odds + parser end-to-end
