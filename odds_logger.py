@@ -559,6 +559,25 @@ def register(app):
             if status_only:
                 st = ml_pick._apisports_get('/status', {})
                 return jsonify({'mode': 'status', 'status_response': st})
+            bets_only = request.args.get('bets', '0') == '1'
+            if bets_only:
+                bb = ml_pick._apisports_get('/odds/bets', {})
+                resp = (bb or {}).get('response') if isinstance(bb, dict) else None
+                names = [r.get('name') for r in (resp or [])]
+                return jsonify({'mode': 'bets', 'count': len(names), 'names': names})
+            premkt_fid = request.args.get('premkt_fixture')
+            if premkt_fid:
+                try: pf = int(premkt_fid)
+                except Exception: return jsonify({'error': 'invalid premkt_fixture'})
+                pm = ml_pick._apisports_get('/odds', {'fixture': pf})
+                resp = (pm or {}).get('response') if isinstance(pm, dict) else None
+                bmset = set(); betset = set()
+                for r0 in (resp or [])[:3]:
+                    for bm in (r0.get('bookmakers') or []):
+                        bmset.add(bm.get('name'))
+                        for bet in (bm.get('bets') or []):
+                            betset.add(bet.get('name'))
+                return jsonify({'mode': 'premkt', 'fid': pf, 'pm_keys': list((pm or {}).keys()) if isinstance(pm, dict) else None, 'pm_results': (pm or {}).get('results') if isinstance(pm, dict) else None, 'bookmakers': sorted(list(bmset))[:30], 'bet_names': sorted(list(betset))[:60]})
             if bare:
                 # Diagnostica plan API-Football: chiama /odds/live SENZA filtro fixture
                 bare_data = ml_pick._apisports_get('/odds/live', {})
