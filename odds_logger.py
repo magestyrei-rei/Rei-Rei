@@ -554,6 +554,26 @@ def register(app):
         """Debug: ispeziona la chain live-fixtures \u2192 live-odds \u2192 parser per UN fixture."""
         try:
             import ml_pick
+            live_bets_full = request.args.get('live_bets_full', '0') == '1'
+            if live_bets_full:
+                # Iterate /odds/live, dump UNION of all bet names + sample value per bet
+                ld = ml_pick._apisports_get('/odds/live', {})
+                resp = (ld or {}).get('response') if isinstance(ld, dict) else []
+                bet_map = {}  # name -> set of value labels
+                fixtures_seen = 0
+                for r0 in (resp or []):
+                    fixtures_seen += 1
+                    for bet in (r0.get('odds') or []):
+                        bn = bet.get('name', '')
+                        if bn not in bet_map:
+                            bet_map[bn] = set()
+                        for vd in (bet.get('values') or []):
+                            v = str(vd.get('value', ''))[:40]
+                            bet_map[bn].add(v)
+                out_bets = sorted([
+                    {'name': k, 'values': sorted(list(v))[:8]} for k, v in bet_map.items()
+                ], key=lambda x: x['name'])
+                return jsonify({'mode': 'live_bets_full', 'fixtures_seen': fixtures_seen, 'unique_bets': len(bet_map), 'bets': out_bets})
             bare = request.args.get('bare', '0') == '1'
             status_only = request.args.get('status', '0') == '1'
             if status_only:
