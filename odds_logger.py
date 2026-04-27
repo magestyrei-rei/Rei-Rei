@@ -549,6 +549,77 @@ def register(app):
             pass
         return jsonify(result)
 
+    @app.route('/api/odds-logger-probe')
+    def api_odds_probe():
+        """Debug: ispeziona la chain live-fixtures \u2192 live-odds \u2192 parser per UN fixture."""
+        try:
+            import ml_pick
+            live = ml_pick._get_live_fixtures_af()
+            fixtures = (live.get('response') if isinstance(live, dict) else None) or []
+            if not fixtures:
+                return jsonify({
+                    'error': 'no live fixtures',
+                    'live_keys': list((live or {}).keys()) if isinstance(live, dict) else None,
+                    'live_results': (live or {}).get('results') if isinstance(live, dict) else None,
+                    'live_errors': (live or {}).get('errors') if isinstance(live, dict) else None,
+                })
+            fid_arg = request.args.get('fixture')
+            target = None
+            if fid_arg:
+                try:
+                    fid_q = int(fid_arg)
+                    target = next((f for f in fixtures if (f.get('fixture') or {}).get('id') == fid_q), None)
+                except Exception:
+                    target = None
+            if target is None:
+                target = fixtures[0]
+            fid = (target.get('fixture') or {}).get('id')
+            try:
+                ctx = ml_pick._fixture_to_model_ctx(target)
+            except Exception as e:
+                ctx = {'_ctx_err': str(e)[:200]}
+            try:
+                odds = ml_pick._get_live_odds(fid)
+            except Exception as e:
+                return jsonify({'fid': fid, 'odds_err': str(e)[:200]})
+            parsed = ml_pick._parse_odds_payload(odds) if isinstance(odds, dict) else {}
+            response = (odds or {}).get('response') if isinstance(odds, dict) else None
+            shape = {
+                'odds_keys': list((odds or {}).keys()) if isinstance(odds, dict) else None,
+                'odds_results': (odds or {}).get('results') if isinstance(odds, dict) else None,
+                'odds_errors': (odds or {}).get('errors') if isinstance(odds, dict) else None,
+                'response_len': len(response) if isinstance(response, list) else None,
+            }
+            sample_raw = None
+            if isinstance(response, list) and response:
+                r0 = response[0] or {}
+                bms = r0.get('bookmakers') or []
+                shape['bookmakers_count'] = len(bms)
+                shape['bm_names'] = [b.get('name') for b in bms[:6]]
+                if bms:
+                    bm0 = bms[0]
+                    bets = bm0.get('bets') or []
+                    shape['first_bm_bets_count'] = len(bets)
+                    shape['first_bm_bet_names'] = [b.get('name') for b in bets[:30]]
+                    if bets:
+                        sample_raw = {
+                            'bm': bm0.get('name'),
+                            'bet0_name': bets[0].get('name'),
+                            'bet0_values': bets[0].get('values'),
+                        }
+            return jsonify({
+                'fid': fid,
+                'ctx_minute': ctx.get('minute') if isinstance(ctx, dict) else None,
+                'ctx_keys': list(ctx.keys()) if isinstance(ctx, dict) else None,
+                'shape': shape,
+                'parsed_markets': list(parsed.keys()) if isinstance(parsed, dict) else None,
+                'parsed_count': sum(len(v or {}) for v in (parsed or {}).values()) if isinstance(parsed, dict) else 0,
+                'sample_raw': sample_raw,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+
     @app.route('/api/odds-logger-stats')
     def api_odds_stats():
         return jsonify({
