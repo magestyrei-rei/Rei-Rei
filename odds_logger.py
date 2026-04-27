@@ -559,6 +559,41 @@ def register(app):
             if status_only:
                 st = ml_pick._apisports_get('/status', {})
                 return jsonify({'mode': 'status', 'status_response': st})
+            auto_premkt = request.args.get('auto_premkt', '0') == '1'
+            if auto_premkt:
+                # Find an upcoming fixture today and run /odds + parser end-to-end
+                import datetime
+                today = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+                fx = ml_pick._apisports_get('/fixtures', {'date': today})
+                fxs = (fx or {}).get('response') if isinstance(fx, dict) else None
+                if not fxs:
+                    return jsonify({'mode': 'auto_premkt', 'error': 'no fixtures today', 'date': today})
+                # pick first popular fixture (top-tier league) or just first
+                target = fxs[0]
+                pf = (target.get('fixture') or {}).get('id')
+                pm = ml_pick._apisports_get('/odds', {'fixture': pf})
+                pm_resp = (pm or {}).get('response') if isinstance(pm, dict) else None
+                parsed = ml_pick._parse_odds_payload(pm) if isinstance(pm, dict) else {}
+                bmset = set(); betset = set()
+                if isinstance(pm_resp, list):
+                    for r0 in pm_resp[:3]:
+                        for bm in (r0.get('bookmakers') or []):
+                            bmset.add(bm.get('name'))
+                            for bet in (bm.get('bets') or []):
+                                betset.add(bet.get('name'))
+                return jsonify({
+                    'mode': 'auto_premkt',
+                    'fid': pf,
+                    'league': (target.get('league') or {}).get('name'),
+                    'home': (target.get('teams') or {}).get('home', {}).get('name'),
+                    'away': (target.get('teams') or {}).get('away', {}).get('name'),
+                    'pm_results': (pm or {}).get('results') if isinstance(pm, dict) else None,
+                    'response_len': len(pm_resp) if isinstance(pm_resp, list) else None,
+                    'bookmakers': sorted(list(bmset))[:30],
+                    'bet_names_in_odds': sorted(list(betset))[:60],
+                    'parsed_markets': list((parsed or {}).keys()),
+                    'parsed_count_per_market': {k: len(v or {}) for k, v in (parsed or {}).items()},
+                })
             bets_only = request.args.get('bets', '0') == '1'
             if bets_only:
                 bb = ml_pick._apisports_get('/odds/bets', {})
