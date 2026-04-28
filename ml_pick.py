@@ -573,3 +573,166 @@ def register(app, adv_data_provider):
             },
             'picks': picks,
         })
+
+
+
+# =====================================================================
+# UI Pick Live + /ml-accuracy  (appended block)
+# =====================================================================
+from flask import Response as _Response
+
+
+def _kelly_fraction(prob, quota, kelly_mult=0.25, stake_max=0.05):
+    edge = prob * quota - 1.0
+    if edge <= 0 or quota <= 1.0:
+        return 0.0, edge
+    b = quota - 1.0
+    f = (b * prob - (1.0 - prob)) / b
+    if f <= 0:
+        return 0.0, edge
+    return min(stake_max, f * kelly_mult), edge
+
+
+_PICKS_MARKET_LABELS = [
+    ('1', '1 (CASA)'), ('X', 'X (PAREGGIO)'), ('2', '2 (OSPITE)'),
+    ('over_1_5', 'OVER 1.5'), ('over_2_5', 'OVER 2.5'), ('over_3_5', 'OVER 3.5'),
+    ('under_1_5', 'UNDER 1.5'), ('under_2_5', 'UNDER 2.5'), ('under_3_5', 'UNDER 3.5'),
+    ('btts_si', 'BTTS SI'), ('btts_no', 'BTTS NO'),
+]
+
+
+def _picks_model_probs(adv):
+    if not isinstance(adv, dict):
+        return {}
+    out = {}
+    mp = {'1':'p1','X':'pX','2':'p2','over_1_5':'over_1_5','over_2_5':'over_2_5','over_3_5':'over_3_5','under_1_5':'under_1_5','under_2_5':'under_2_5','under_3_5':'under_3_5','btts_si':'btts_si','btts_no':'btts_no'}
+    for k, ak in mp.items():
+        v = adv.get(ak)
+        if v is None: continue
+        try: fv = float(v)
+        except Exception: continue
+        if 0.0 < fv < 1.0: out[k] = fv
+    return out
+
+
+def _picks_best_quota(parsed, mkt):
+    bm = parsed.get(mkt) if isinstance(parsed, dict) else None
+    if not bm: return None, None
+    try:
+        b, q = max(bm.items(), key=lambda x: x[1])
+        return b, float(q)
+    except Exception:
+        return None, None
+
+
+def register_picks_ui(app, get_adv_data):
+    """Registra /api/ml-live-picks-all, /api/ml-accuracy-stats, /picks, /ml-accuracy."""
+    @app.route('/api/ml-live-picks-all')
+    def api_ml_live_picks_all():
+        try:
+            capital = float(request.args.get('capital', 1000))
+            kelly = float(request.args.get('kelly', 0.25))
+            edge_min = float(request.args.get('edge_min', 0.03))
+            stake_max = float(request.args.get('stake_max', 0.05))
+            limit = int(request.args.get('limit', 30))
+        except Exception:
+            return jsonify({'error': 'invalid params'}), 400
+        live = _get_live_fixtures_af()
+        if not isinstance(live, dict):
+            return jsonify({'error': 'live fixtures bad response'}), 502
+        fixtures = (live.get('response') or [])[:limit]
+        results = []
+        for f in fixtures:
+            try:
+                ctx = _fixture_to_model_ctx(f)
+                if not isinstance(ctx, dict): continue
+                m = ctx.get('minute')
+                if m is None or m < 1 or m > 120: continue
+                fid = ctx.get('fixture_id'); lid = ctx.get('league_id')
+                sh = ctx.get('score_home', 0) or 0; sa = ctx.get('score_away', 0) or 0
+                try: odds = _get_live_odds(fid)
+                except Exception: odds = None
+                parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
+                if not parsed: continue
+                try: adv = get_adv_data(lid, m, sh, sa)
+                except Exception: adv = None
+                mps = _picks_model_probs(adv)
+                if not mps: continue
+                picks = []
+                for mk, ml in _PICKS_MARKET_LABELS:
+                    p = mps.get(mk)
+                    if not p: continue
+                    bk, q = _picks_best_quota(parsed, mk)
+                    if not bk or not q or q <= 1.0: continue
+                    fk, ed = _kelly_fraction(p, q, kelly, stake_max)
+                    if ed < edge_min: continue
+                    picks.append({'market': mk, 'market_label': ml, 'prob': round(p, 4), 'fair_quota': round(1.0/p, 3), 'bookie': bk, 'bookie_quota': round(q, 3), 'edge_pct': round(ed*100.0, 2), 'stake_pct': round(fk*100.0, 2), 'stake_eur': round(capital*fk, 2)})
+                if not picks: continue
+                picks.sort(key=lambda x: -x['edge_pct'])
+                results.append({'fixture_id': fid, 'league_id': lid, 'league_name': ctx.get('league_name'), 'country': ctx.get('country'), 'home': ctx.get('home_team_name'), 'away': ctx.get('away_team_name'), 'minute': m, 'score': '%d-%d' % (sh, sa), 'picks': picks[:6]})
+            except Exception:
+                continue
+        results.sort(key=lambda r: -(r['picks'][0]['edge_pct'] if r['picks'] else 0))
+        return jsonify({'params': {'capital': capital, 'kelly_mult': kelly, 'edge_min': edge_min, 'stake_max': stake_max}, 'fixtures_total': len(live.get('response') or []), 'fixtures_with_picks': len(results), 'fixtures': results})
+
+    @app.route('/api/ml-accuracy-stats')
+    def api_ml_accuracy_stats():
+        try:
+            import predictions_settlement as pset
+            try: pset._ensure_ddl()
+            except Exception: pass
+            tot = pset._turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log WHERE ft_home IS NOT NULL")
+            sc = (tot or [{}])[0].get('n', 0)
+            tf = pset._turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log WHERE ft_home IS NOT NULL AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16")
+            fc = (tf or [{}])[0].get('n', 0)
+            bl = pset._turso_select_rows("SELECT league_id, league_name, COUNT(*) AS n FROM predictions_log WHERE ft_home IS NOT NULL GROUP BY league_id ORDER BY n DESC LIMIT 30")
+            rc = pset._turso_select_rows("SELECT fixture_id, league_name, home_team_name, away_team_name, ft_home, ft_away, first_goal_minute, settled_ts FROM predictions_log WHERE ft_home IS NOT NULL ORDER BY settled_ts DESC LIMIT 20")
+            try:
+                sn = pset._turso_select_rows("SELECT COUNT(*) AS n FROM odds_snapshots o JOIN predictions_log p ON o.fixture_id = p.fixture_id WHERE p.ft_home IS NOT NULL")
+                snc = (sn or [{}])[0].get('n', 0)
+            except Exception:
+                snc = 0
+            csta = None
+            try:
+                import ml_poisson
+                if hasattr(ml_poisson, '_CAL_STATE'):
+                    s = ml_poisson._CAL_STATE
+                    csta = {'last_run_ts': s.get('last_run_ts', 0), 'last_n_global': s.get('last_n_global', 0), 'last_error': s.get('last_error')}
+            except Exception:
+                pass
+            return jsonify({'settled_count': sc, 'fgm_le16_count': fc, 'snapshots_with_outcome': snc, 'by_league': bl or [], 'recent_settled': rc or [], 'calibration': csta, 'note': 'Brier/LogLoss/ROI: occorrono >= 50 fixture settlate con quote loggate.'})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/picks')
+    def picks_page():
+        return _Response(_PICKS_HTML, mimetype='text/html')
+
+    @app.route('/ml-accuracy')
+    def ml_accuracy_page():
+        return _Response(_ACCURACY_HTML, mimetype='text/html')
+
+
+_PICKS_HTML = """<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Pick Live</title>
+<style>body{font-family:sans-serif;margin:0;padding:16px;background:#0d1117;color:#e6edf3}h1{margin:0 0 4px;font-size:22px}.muted{color:#8b949e;font-size:13px}.controls{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0;padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d}.controls label{font-size:12px;color:#8b949e;display:block}.controls input{width:100px;padding:6px 8px;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:4px}.btn{padding:8px 16px;background:#238636;color:#fff;border:none;border-radius:4px;cursor:pointer}.fixture{margin:12px 0;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:8px}.fix-head{display:flex;justify-content:space-between;border-bottom:1px solid #30363d;padding-bottom:8px;margin-bottom:8px}.fix-teams{font-weight:600;font-size:15px}.fix-meta{color:#8b949e;font-size:12px}.score{color:#f0883e;font-weight:600}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:6px 8px;color:#8b949e;font-size:11px;text-transform:uppercase}td{padding:6px 8px;border-top:1px solid #21262d}.pos{color:#3fb950;font-weight:600}.market{font-weight:600}.stake{color:#f0883e;font-weight:600}#status{padding:12px;background:#161b22;border-radius:8px;border:1px solid #30363d;margin-bottom:12px}.empty{padding:24px;text-align:center;color:#8b949e;background:#161b22;border-radius:8px;border:1px dashed #30363d}a{color:#58a6ff;text-decoration:none}</style></head><body>
+<a href="/">&larr; Home</a> &middot; <a href="/ml">ML Predictor</a> &middot; <a href="/ml-accuracy">Accuracy</a>
+<h1>Pick Live</h1><div class="muted">Edge positivo + Kelly stake. Quote /odds/live + Poisson (lega, minuto, score).</div>
+<div class="controls">
+<div><label>Capitale (EUR)</label><input type="number" id="cap" value="1000" min="0" step="50"></div>
+<div><label>Frazione Kelly</label><input type="number" id="kly" value="0.25" min="0" max="1" step="0.05"></div>
+<div><label>Edge minimo</label><input type="number" id="edm" value="0.03" min="0" max="1" step="0.01"></div>
+<div><label>Stake max</label><input type="number" id="stm" value="0.05" min="0" max="1" step="0.01"></div>
+<div style="align-self:flex-end"><button class="btn" onclick="loadPicks()">Aggiorna</button></div>
+</div><div id="status" class="muted">Premi "Aggiorna" per caricare</div><div id="results"></div>
+<script>async function loadPicks(){const c=document.getElementById('cap').value,k=document.getElementById('kly').value,e=document.getElementById('edm').value,s=document.getElementById('stm').value,st=document.getElementById('status'),r=document.getElementById('results');st.textContent='Caricamento...';r.innerHTML='';try{const x=await fetch('/api/ml-live-picks-all?capital='+c+'&kelly='+k+'&edge_min='+e+'&stake_max='+s,{cache:'no-store'}),j=await x.json();if(j.error){st.textContent='Errore: '+j.error;return}st.innerHTML='Live: <b>'+j.fixtures_total+'</b> fixture, <b>'+j.fixtures_with_picks+'</b> con pick. Capitale: <b>EUR '+j.params.capital+'</b>, Kelly <b>'+j.params.kelly_mult+'</b>, edge min <b>'+(j.params.edge_min*100).toFixed(1)+'%</b>';if(!j.fixtures||!j.fixtures.length){r.innerHTML='<div class="empty">Nessuna pick: niente partite live coperte da quote o edge < soglia.</div>';return}let h='';for(const f of j.fixtures){h+='<div class="fixture"><div class="fix-head"><div><div class="fix-teams">'+(f.home||'?')+' vs '+(f.away||'?')+'</div><div class="fix-meta">'+(f.country||'')+' &middot; '+(f.league_name||'')+'</div></div><div><span class="score">'+f.score+'</span> &middot; '+f.minute+"'</div></div>";h+='<table><thead><tr><th>Mercato</th><th>Prob</th><th>Quota fair</th><th>Quota bookie</th><th>Bookie</th><th>Edge</th><th>Stake</th><th>EUR</th></tr></thead><tbody>';for(const p of f.picks){h+='<tr><td class="market">'+p.market_label+'</td><td>'+(p.prob*100).toFixed(1)+'%</td><td>'+p.fair_quota+'</td><td>'+p.bookie_quota+'</td><td>'+p.bookie+'</td><td class="pos">+'+p.edge_pct+'%</td><td>'+p.stake_pct+'%</td><td class="stake">EUR '+p.stake_eur+'</td></tr>'}h+='</tbody></table></div>'}r.innerHTML=h}catch(err){st.textContent='Errore di rete: '+err.message}}</script></body></html>"""
+
+
+_ACCURACY_HTML = """<!doctype html><html lang="it"><head><meta charset="utf-8"><title>ML Accuracy</title>
+<style>body{font-family:sans-serif;margin:0;padding:16px;background:#0d1117;color:#e6edf3}h1{margin:0 0 4px;font-size:22px}.muted{color:#8b949e;font-size:13px}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0}.kpi{padding:16px;background:#161b22;border:1px solid #30363d;border-radius:8px}.kpi-label{color:#8b949e;font-size:12px;text-transform:uppercase}.kpi-value{font-size:26px;font-weight:700;color:#58a6ff;margin-top:4px}.section{margin:16px 0;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:8px}.section h2{margin:0 0 8px;font-size:16px;color:#f0883e}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:6px 8px;color:#8b949e;font-size:11px;text-transform:uppercase;border-bottom:1px solid #30363d}td{padding:6px 8px;border-top:1px solid #21262d}a{color:#58a6ff;text-decoration:none}.note{padding:12px;background:#1f2733;border-left:3px solid #58a6ff;border-radius:4px;font-size:13px}</style></head><body>
+<a href="/">&larr; Home</a> &middot; <a href="/ml">ML Predictor</a> &middot; <a href="/picks">Pick Live</a>
+<h1>ML Accuracy</h1><div class="muted">Metriche modello su predictions_log + odds_snapshots.</div>
+<div id="kpis" class="kpis"></div><div id="cal" class="section" style="display:none"><h2>Stato calibrazione Poisson</h2><div id="cal-body"></div></div>
+<div class="section"><h2>Top leghe per fixture settlate</h2><div id="bl"></div></div>
+<div class="section"><h2>Ultime 20 fixture settlate</h2><div id="rc"></div></div>
+<div id="note" class="note"></div>
+<script>async function load(){try{const r=await fetch('/api/ml-accuracy-stats?_='+Date.now(),{cache:'no-store'}),j=await r.json();if(j.error){document.getElementById('kpis').innerHTML=k('Errore',j.error);return}let kp='';kp+=k('Settlate (FT)',j.settled_count);kp+=k('Primo gol &le; 16',j.fgm_le16_count);kp+=k('Snapshot linkati',j.snapshots_with_outcome);kp+=k('Leghe',(j.by_league||[]).length);document.getElementById('kpis').innerHTML=kp;if(j.calibration){const c=j.calibration,t=c.last_run_ts?new Date(c.last_run_ts*1000).toLocaleString('it-IT'):'mai';document.getElementById('cal').style.display='block';document.getElementById('cal-body').innerHTML='<div>Ultima ricalibrazione: <b>'+t+'</b></div><div>Sample globali: <b>'+(c.last_n_global||0)+'</b></div>'+(c.last_error?'<div style="color:#f85149">Errore: '+c.last_error+'</div>':'')}let bh='<table><thead><tr><th>League ID</th><th>Nome</th><th>Settlate</th></tr></thead><tbody>';for(const l of(j.by_league||[]))bh+='<tr><td>'+(l.league_id||'?')+'</td><td>'+(l.league_name||'?')+'</td><td>'+(l.n||0)+'</td></tr>';bh+='</tbody></table>';if(!(j.by_league||[]).length)bh='<div class="muted">Nessuna fixture settlata ancora.</div>';document.getElementById('bl').innerHTML=bh;let rh='<table><thead><tr><th>Fixture</th><th>Lega</th><th>Match</th><th>FT</th><th>1° gol</th><th>Settled</th></tr></thead><tbody>';for(const r of(j.recent_settled||[])){const t=r.settled_ts?new Date(r.settled_ts*1000).toLocaleString('it-IT'):'?';rh+='<tr><td>'+r.fixture_id+'</td><td>'+(r.league_name||'?')+'</td><td>'+(r.home_team_name||'?')+' vs '+(r.away_team_name||'?')+'</td><td>'+r.ft_home+'-'+r.ft_away+'</td><td>'+(r.first_goal_minute!=null?r.first_goal_minute+"'":'-')+'</td><td>'+t+'</td></tr>'}rh+='</tbody></table>';if(!(j.recent_settled||[]).length)rh='<div class="muted">Nessuna fixture settlata.</div>';document.getElementById('rc').innerHTML=rh;document.getElementById('note').textContent=j.note||''}catch(e){document.getElementById('kpis').innerHTML=k('Errore',e.message)}}function k(l,v){return '<div class="kpi"><div class="kpi-label">'+l+'</div><div class="kpi-value">'+(v!=null?v:'?')+'</div></div>'}load();</script></body></html>"""
