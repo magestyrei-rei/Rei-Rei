@@ -384,6 +384,7 @@ def register(app, query_fn):
     # Registra le route di ml_pick: /api/ml-env-check, /api/ml-live-fixtures-af,
     # /api/ml-odds-debug, /api/ml-pick
     ml_pick.register(app, _get_adv_data)
+    ml_pick.register_picks_ui(app, _get_adv_data)  # /picks, /ml-accuracy, /api/ml-live-picks-all, /api/ml-accuracy-stats
     # Registra le route di odds_logger: /api/odds-logger-tick, -stats, -dump, -csv, -ddl
     odds_logger.register(app)
     ml_poisson.register(app)  # /api/ml-poisson, /api/ml-calibration-status, /api/ml-recalibrate
