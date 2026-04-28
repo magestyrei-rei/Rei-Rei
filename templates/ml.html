@@ -52,6 +52,9 @@
   <div class="tabs">
     <div class="tab active" data-view="live">Live (minuto + score)</div>
     <div class="tab" data-view="eg">Early-goal (legacy)</div>
+    <div class="tab" data-view="picks">Pick Live</div>
+    <div class="tab" data-view="acc">ML Accuracy</div>
+    <div class="tab" data-view="how">Come funziona</div>
   </div>
 
   <section class="view active" id="view-live">
@@ -118,6 +121,88 @@
     </div>
   </section>
 
+  <section class="view" id="view-picks">
+    <div class="controls">
+      <div><label>Capitale (EUR)</label><input type="number" id="p-cap" value="1000" min="0" step="50"></div>
+      <div><label>Frazione Kelly</label><input type="number" id="p-kly" value="0.25" min="0" max="1" step="0.05"></div>
+      <div><label>Edge minimo</label><input type="number" id="p-edm" value="0.03" min="0" max="1" step="0.01"></div>
+      <div><label>Stake max</label><input type="number" id="p-stm" value="0.05" min="0" max="1" step="0.01"></div>
+      <div><label>&nbsp;</label><button class="btn" onclick="loadPicks()">Aggiorna</button></div>
+    </div>
+    <div id="p-status" class="muted" style="margin-top:14px;color:#94a3b8;font-size:13px;padding:10px 14px;background:#1e293b;border-radius:6px;border:1px solid #334155">Premi "Aggiorna" per caricare i pick live</div>
+    <div id="p-results" style="margin-top:14px"></div>
+  </section>
+
+  <section class="view" id="view-acc">
+    <div class="cards" id="a-kpis"></div>
+    <div id="a-cal" style="display:none;margin-top:14px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px"><h3 style="margin:0 0 8px;color:#f1f5f9;font-size:14px">Calibrazione Poisson</h3><div id="a-cal-body" style="font-size:13px;color:#94a3b8"></div></div>
+    <div style="margin-top:14px"><h3 style="margin:0 0 8px;color:#f1f5f9;font-size:14px">Top leghe per fixture settlate</h3><div id="a-bl"></div></div>
+    <div style="margin-top:14px"><h3 style="margin:0 0 8px;color:#f1f5f9;font-size:14px">Ultime 20 fixture settlate</h3><div id="a-rc"></div></div>
+    <div id="a-note" class="notes" style="display:none;margin-top:14px"></div>
+  </section>
+
+  <section class="view" id="view-how">
+    <div class="notes" style="line-height:1.7;font-size:13px">
+      <h2 style="margin:0 0 14px;color:#f1f5f9;font-size:18px">Come funziona il ML Predictor</h2>
+      <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Live (minuto + score)"</h3>
+      <p>Modello <b>Poisson</b> calibrato su <b>~9.000 partite reali 2010-2024</b>. Per ogni combinazione (campionato, minuto-snapshot, score-attuale) ti dice la probabilità per:</p>
+      <ul>
+        <li><b>1X2 finale</b> (Casa / Pareggio / Ospite)</li>
+        <li><b>OVER/UNDER</b> 1.5, 2.5, 3.5 gol totali</li>
+        <li><b>BTTS</b> (Both Teams To Score) Sì/No</li>
+        <li><b>Stessi mercati per il 2° tempo</b> (dal minuto attuale al 90)</li>
+        <li><b>Probabilità di chi segna nel 2T</b> (Casa / Ospite / Nessuno)</li>
+      </ul>
+      <p>Per ogni mercato vedi la <b>quota equa</b> = 1 / probabilità. Se il bookmaker offre una quota più alta della quota equa, hai un <b>edge positivo</b>.</p>
+
+      <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Pick Live"</h3>
+      <p>Pesca le partite <b>in corso adesso</b>, applica il modello Poisson, confronta con le quote del bookmaker (raccolte via API-Football <code>/odds/live</code> ogni 30 min). Per ogni mercato calcola:</p>
+      <ul>
+        <li><b>Edge</b> = (probabilità modello × quota bookie) − 1</li>
+        <li><b>Stake Kelly</b> = (b·p − q) / b dove b = quota−1, p = probabilità, q = 1−p</li>
+        <li><b>Stake EUR</b> = capitale × stake_pct (con cap di stake_max)</li>
+      </ul>
+      <p>I parametri configurabili: capitale, frazione Kelly (0.25 = quarto-Kelly = conservativo), edge minimo, stake max %.</p>
+
+      <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "ML Accuracy"</h3>
+      <p>Statistiche del modello: fixture settlate, distribuzione per lega, snapshot quote linkati. Quando avremo ≥50 fixture settlate con quote loggate appariranno anche <b>Brier score</b>, <b>Log loss</b> e <b>ROI</b> dei pick storici.</p>
+
+      <h2 style="margin:24px 0 10px;color:#f1f5f9;font-size:16px">Come usarlo al meglio — regole pratiche</h2>
+
+      <h3 style="margin:12px 0 6px;color:#3fb950;font-size:14px">✅ DA FARE</h3>
+      <ul>
+        <li><b>Investi solo con edge ≥ 3%</b> (default). Sotto soglia non scommettere.</li>
+        <li><b>Usa stake Kelly frazionato (0.25)</b>, mai Kelly pieno (1.0). Riduci la varianza del bankroll.</li>
+        <li><b>Cap stake al 5% del capitale</b> per pick. Mai esporre più di un ventesimo del bankroll su una singola partita.</li>
+        <li><b>Probabilità ≥ 65%</b> = pick affidabile (insieme a edge positivo).</li>
+        <li><b>n_eff ≥ 30</b> nel bucket (lega/minuto/score): meno è "rumoroso".</li>
+        <li><b>Filtra per lega</b>: top-tier (Premier League, Serie A, La Liga, Bundesliga, Ligue 1) hanno la copertura migliore di quote live.</li>
+      </ul>
+
+      <h3 style="margin:12px 0 6px;color:#f85149;font-size:14px">❌ DA NON FARE</h3>
+      <ul>
+        <li><b>Non puntare su edge negativo</b>. Se la quota bookmaker è più bassa della tua quota equa, il bookie pensa che la prob reale sia più bassa della tua. Spesso ha ragione.</li>
+        <li><b>Non puntare con probabilità < 50%</b> anche se l'edge è alto. Pick "underdog" hanno alta varianza.</li>
+        <li><b>Non rincorrere le perdite</b> (martingala). Il Kelly è già la strategia ottima di gestione bankroll.</li>
+        <li><b>Non puntare su leghe poco coperte</b> (lower divisions, friendlies). Il modello può essere meno calibrato.</li>
+        <li><b>Non puntare se n_eff < 10</b>. Bucket troppo piccolo = stima inaffidabile.</li>
+      </ul>
+
+      <h2 style="margin:24px 0 10px;color:#f1f5f9;font-size:16px">Esempio pratico</h2>
+      <p>Partita Roma vs Milan, 60', score attuale 0-1. Selezioni il bucket nel tab "Live":</p>
+      <ul>
+        <li><b>Probabilità BTTS Si = 72%</b> (n_bucket = 245 sample storici)</li>
+        <li><b>Quota equa = 1 / 0.72 = 1.39</b></li>
+        <li>Bet365 offre quota 1.65 su BTTS</li>
+        <li><b>Edge = 0.72 × 1.65 − 1 = +18.8%</b> — molto alto, soglia 3% superata</li>
+        <li><b>Kelly stake</b> = (0.65·0.72 − 0.28) / 0.65 = 28.8% del bankroll</li>
+        <li>Con kelly_mult=0.25 → 7.2% → cap a 5% → <b>50 EUR su 1000 EUR</b></li>
+      </ul>
+
+      <p style="background:#3a2a0a;border-left:3px solid #fde68a;padding:12px;margin-top:20px;color:#fde68a;border-radius:4px"><b>Disclaimer:</b> il modello è uno strumento statistico. Anche con edge positivo, ogni singola pick può perdere. Il valore atteso positivo si manifesta su <b>centinaia/migliaia</b> di scommesse, non su poche. Gioca solo somme che puoi permetterti di perdere.</p>
+    </div>
+  </section>
+
   <div class="notes">
     <b>Come usarlo:</b> seleziona campionato + minuto + score attuale. Se lo score esatto non e' disponibile,
     seleziona il minuto piu' vicino e lo score, e confronta la quota offerta con la <i>quota equa</i>.
@@ -165,6 +250,8 @@ document.querySelectorAll(".tab").forEach(function(t){
     t.classList.add("active");
     $("view-"+t.dataset.view).classList.add("active");
     if (t.dataset.view === "eg" && !EG) loadEG();
+    if (t.dataset.view === "picks") loadPicks();
+    if (t.dataset.view === "acc") loadAccuracy();
   });
 });
 
@@ -226,6 +313,82 @@ function loadEG(){
 }
 
 loadAdv();
+
+async function loadPicks() {
+  const cap = $("p-cap").value, kly = $("p-kly").value, edm = $("p-edm").value, stm = $("p-stm").value;
+  const status = $("p-status"), results = $("p-results");
+  status.textContent = "Caricamento...";
+  results.innerHTML = "";
+  try {
+    const r = await fetch("/api/ml-live-picks-all?capital=" + cap + "&kelly=" + kly + "&edge_min=" + edm + "&stake_max=" + stm, {cache: "no-store"});
+    const j = await r.json();
+    if (j.error) { status.textContent = "Errore: " + j.error; return; }
+    status.innerHTML = "Live: <b>" + j.fixtures_total + "</b> fixture, <b>" + j.fixtures_with_picks + "</b> con pick. Capitale: <b>EUR " + j.params.capital + "</b>, Kelly <b>" + j.params.kelly_mult + "</b>, edge min <b>" + (j.params.edge_min*100).toFixed(1) + "%</b>";
+    if (!j.fixtures || !j.fixtures.length) {
+      results.innerHTML = '<div class="empty" style="background:#1e293b;border:1px dashed #334155;border-radius:8px;padding:24px">Nessuna pick disponibile. Cause: niente partite live coperte da quote, oppure edge sotto soglia.</div>';
+      return;
+    }
+    let h = "";
+    for (const f of j.fixtures) {
+      h += '<div class="panel"><h3>' + (f.home||"?") + ' vs ' + (f.away||"?") + ' <span>' + (f.country||"") + ' &middot; ' + (f.league_name||"") + ' &middot; <b style="color:#f0883e">' + f.score + "</b> &middot; " + f.minute + "'</span></h3>";
+      h += '<table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0"><thead><tr style="border-bottom:1px solid #334155"><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px;text-transform:uppercase">Mercato</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Prob</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Q.fair</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Q.bookie</th><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px">Bookie</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Edge</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Stake</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">EUR</th></tr></thead><tbody>';
+      for (const p of f.picks) {
+        h += '<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-weight:600">' + p.market_label + "</td>";
+        h += '<td style="text-align:right;padding:6px 8px">' + (p.prob*100).toFixed(1) + "%</td>";
+        h += '<td style="text-align:right;padding:6px 8px">' + p.fair_quota + "</td>";
+        h += '<td style="text-align:right;padding:6px 8px">' + p.bookie_quota + "</td>";
+        h += '<td style="padding:6px 8px;font-size:11px;color:#94a3b8">' + p.bookie + "</td>";
+        h += '<td style="text-align:right;padding:6px 8px;color:#3fb950;font-weight:600">+' + p.edge_pct + "%</td>";
+        h += '<td style="text-align:right;padding:6px 8px">' + p.stake_pct + "%</td>";
+        h += '<td style="text-align:right;padding:6px 8px;color:#f0883e;font-weight:600">EUR ' + p.stake_eur + "</td></tr>";
+      }
+      h += "</tbody></table></div>";
+    }
+    results.innerHTML = h;
+  } catch (e) {
+    status.textContent = "Errore di rete: " + e.message;
+  }
+}
+
+async function loadAccuracy() {
+  try {
+    const r = await fetch("/api/ml-accuracy-stats?_=" + Date.now(), {cache: "no-store"});
+    const j = await r.json();
+    if (j.error) { $("a-kpis").innerHTML = kpiCard("Errore", j.error); return; }
+    let kp = "";
+    kp += kpiCard("Settlate (FT)", j.settled_count);
+    kp += kpiCard("Primo gol \u2264 16", j.fgm_le16_count);
+    kp += kpiCard("Snapshot linkati", j.snapshots_with_outcome);
+    kp += kpiCard("Leghe", (j.by_league||[]).length);
+    $("a-kpis").innerHTML = kp;
+    if (j.calibration) {
+      const c = j.calibration, ts = c.last_run_ts ? new Date(c.last_run_ts*1000).toLocaleString("it-IT") : "mai";
+      $("a-cal").style.display = "block";
+      $("a-cal-body").innerHTML = "<div>Ultima ricalibrazione: <b>" + ts + "</b></div><div>Sample globali: <b>" + (c.last_n_global||0) + "</b></div>" + (c.last_error ? '<div style="color:#f85149">Errore: '+c.last_error+'</div>' : '');
+    }
+    let bh = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:1px solid #334155"><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px;text-transform:uppercase">League ID</th><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px">Nome</th><th style="text-align:right;padding:6px 8px;color:#94a3b8;font-size:11px">Settlate</th></tr></thead><tbody>';
+    for (const l of (j.by_league||[])) bh += '<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px">' + (l.league_id||"?") + '</td><td style="padding:6px 8px">' + (l.league_name||"?") + '</td><td style="text-align:right;padding:6px 8px;font-weight:600">' + (l.n||0) + "</td></tr>";
+    bh += "</tbody></table>";
+    if (!(j.by_league||[]).length) bh = '<div class="empty">Nessuna fixture settlata ancora.</div>';
+    $("a-bl").innerHTML = bh;
+    let rh = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:1px solid #334155"><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px;text-transform:uppercase">Fixture</th><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px">Lega</th><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px">Match</th><th style="text-align:center;padding:6px 8px;color:#94a3b8;font-size:11px">FT</th><th style="text-align:center;padding:6px 8px;color:#94a3b8;font-size:11px">1\u00b0 gol</th><th style="text-align:left;padding:6px 8px;color:#94a3b8;font-size:11px">Settled</th></tr></thead><tbody>';
+    for (const r of (j.recent_settled||[])) {
+      const ts = r.settled_ts ? new Date(r.settled_ts*1000).toLocaleString("it-IT") : "?";
+      rh += '<tr style="border-top:1px solid #1e293b"><td style="padding:6px 8px;font-size:11px;color:#94a3b8">' + r.fixture_id + '</td><td style="padding:6px 8px">' + (r.league_name||"?") + '</td><td style="padding:6px 8px">' + (r.home_team_name||"?") + ' vs ' + (r.away_team_name||"?") + '</td><td style="text-align:center;padding:6px 8px;color:#f0883e;font-weight:600">' + r.ft_home + '-' + r.ft_away + '</td><td style="text-align:center;padding:6px 8px">' + (r.first_goal_minute!=null ? r.first_goal_minute+"'" : "-") + '</td><td style="padding:6px 8px;font-size:11px;color:#94a3b8">' + ts + "</td></tr>";
+    }
+    rh += "</tbody></table>";
+    if (!(j.recent_settled||[]).length) rh = '<div class="empty">Nessuna fixture settlata ancora.</div>';
+    $("a-rc").innerHTML = rh;
+    if (j.note) { $("a-note").style.display = "block"; $("a-note").textContent = j.note; }
+  } catch (e) {
+    $("a-kpis").innerHTML = kpiCard("Errore", e.message);
+  }
+}
+
+function kpiCard(label, value) {
+  return '<div class="card"><div class="lab">' + label + '</div><div class="val">' + (value!=null ? value : "?") + "</div></div>";
+}
+
 </script>
 </body>
 </html>
