@@ -35,6 +35,13 @@ TURSO_TOKEN = os.getenv('TURSO_TOKEN', '')
 TICK_AUTH_TOKEN = os.getenv('TICK_AUTH_TOKEN', '')   # condiviso col cron esterno per proteggere /tick
 LOGGER_MAX_FIXTURES = int(os.getenv('LOGGER_MAX_FIXTURES', '40'))   # safety: max fixture per tick
 
+# Whitelist leghe da seguire (set vuoto = nessun filtro). Allineato al workflow n8n / dataset gol-16min.
+LEAGUE_WHITELIST = {
+    2, 3, 39, 40, 41, 42, 43, 61, 62, 78, 79, 88, 89, 94, 95, 98,
+    106, 107, 110, 119, 120, 129, 131, 135, 136, 138, 140, 141,
+    144, 145, 162, 172, 179, 180, 181, 182, 183, 184, 188, 943,
+}
+
 # ----- In-memory ring buffer (fallback / test) -----
 _MEM_ROWS = []
 _MEM_CAP = int(os.getenv('LOGGER_MEM_CAP', '200000'))
@@ -428,6 +435,8 @@ def do_tick():
         return result
 
     fixtures = live.get('response') or []
+    if LEAGUE_WHITELIST:
+        fixtures = [f for f in fixtures if (f.get('league') or {}).get('id') in LEAGUE_WHITELIST]
     fixtures = fixtures[:LOGGER_MAX_FIXTURES]
     result['fixtures_scanned'] = len(fixtures)
 
