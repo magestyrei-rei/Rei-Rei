@@ -37,9 +37,16 @@ LOGGER_MAX_FIXTURES = int(os.getenv('LOGGER_MAX_FIXTURES', '40'))   # safety: ma
 
 # Whitelist leghe da seguire (set vuoto = nessun filtro). Allineato al workflow n8n / dataset gol-16min.
 LEAGUE_WHITELIST = {
-    2, 3, 39, 40, 41, 42, 43, 61, 62, 78, 79, 88, 89, 94, 95, 98,
-    106, 107, 110, 119, 120, 129, 131, 135, 136, 138, 140, 141,
-    144, 145, 162, 172, 179, 180, 181, 182, 183, 184, 188, 943,
+    # Top europee
+    2, 3, 39, 40, 41, 42, 43, 61, 62, 71, 72, 78, 79,
+    88, 89, 94, 95, 98, 106, 107, 110, 119, 120,
+    129, 131, 135, 136, 138, 140, 141, 144, 145,
+    162, 172, 179, 180, 181, 182, 183, 184, 188,
+    # Aggiunte da n8n workflow (27 leghe extra)
+    197, 203, 204, 207, 208, 210, 218, 219,
+    239, 253, 265, 268, 270, 281, 283, 286,
+    292, 293, 299, 345, 346, 373, 383, 408,
+    942, 943,
 }
 
 # ----- In-memory ring buffer (fallback / test) -----
