@@ -1,0 +1,21 @@
+name: Add 12 New Leagues to football.db
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add new leagues
+        run: python3 scripts/add_new_leagues.py
+
+      - name: Commit DB
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add football.db.gz
+          git diff --staged --quiet || (git commit -m "Add 12 new leagues to football.db.gz" && git push)
