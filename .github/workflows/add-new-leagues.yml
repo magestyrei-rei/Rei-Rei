@@ -3,6 +3,9 @@ name: Add 12 New Leagues to football.db
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update-db:
     runs-on: ubuntu-latest
