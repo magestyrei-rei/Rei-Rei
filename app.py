@@ -722,6 +722,86 @@ def admin_delete_fixture():
     execute("DELETE FROM matches WHERE fixture_id=?", (fixture_id,))
     return jsonify({"ok": True, "deleted_fixture_id": fixture_id})
 
+
+@app.route('/download/league/<int:lid>')
+def download_league(lid):
+    """Genera e scarica un file HTML con tutte le partite early-goal di una lega."""
+    from flask import Response
+    from datetime import datetime
+
+    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    if not info:
+        return jsonify({'error': 'League not found'}), 404
+    league_name = info[0]['name']
+
+    matches = query("""
+        SELECT season, date_str, sort_date, time_str,
+               home_team, away_team,
+               ht_home, ht_away, st_home, st_away, ft_home, ft_away,
+               goals_html, first_goal_min
+        FROM matches
+        WHERE league_id=?
+        ORDER BY season DESC, sort_date ASC, time_str ASC
+    """, (lid,))
+
+    css = (
+        'body{font-family:Arial,sans-serif;margin:24px;background:#f5f7fb;color:#172033}'
+        'table{width:100%;border-collapse:collapse;background:#fff}'
+        'th,td{border:1px solid #d9e0ee;padding:8px 10px;text-align:left;vertical-align:top;font-size:13px}'
+        'th{background:#1f3b73;color:#fff}'
+        '.away-goal{color:#d11a2a;font-weight:700}'
+        'tr:nth-child(even) td{background:#f8faff}'
+    )
+
+    now = datetime.now().strftime('%d/%m/%Y, %H:%M:%S')
+    count = len(matches)
+
+    rows = []
+    for m in matches:
+        parts = (m['date_str'] or '').split('-')
+        date_it = f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else (m['date_str'] or '')
+        ht = f"{m['ht_home']}-{m['ht_away']}"
+        st = f"{m['st_home']}-{m['st_away']}"
+        ft = f"{m['ft_home']}-{m['ft_away']}"
+        rows.append(
+            f"<tr><td>{m['season']}</td><td>{date_it}</td><td>{m['time_str'] or ''}</td>"
+            f"<td>{m['home_team']}</td><td>{m['away_team']}</td><td>{league_name}</td>"
+            f"<td>{ht}</td><td>{st}</td><td>{ft}</td>"
+            f"<td>{m['goals_html'] or ''}</td><td>-</td><td>-</td><td>-</td></tr>"
+        )
+
+    if not rows:
+        rows.append("<tr><td colspan='13'>Nessuna partita trovata con primo gol entro il 16'.</td></tr>")
+
+    html = f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>{league_name} - Primo gol entro 16 minuti</title>
+<style>{css}</style>
+</head>
+<body>
+<h1>{league_name} - Primo gol entro il 16 minuto</h1>
+<p>Generato il {now} | Partite trovate: {count}</p>
+<table>
+<thead>
+<tr><th>Stagione</th><th>Data</th><th>Ora</th><th>Casa</th><th>Ospite</th><th>Campionato</th>
+<th>1T</th><th>2T</th><th>Finale</th><th>Minuti gol</th><th>Quota 1</th><th>Quota X</th><th>Quota 2</th></tr>
+</thead>
+<tbody>
+{"".join(rows)}
+</tbody>
+</table>
+</body>
+</html>"""
+
+    filename = f'{lid}_gol-16min.html'
+    return Response(
+        html,
+        mimetype='text/html',
+        headers={{'Content-Disposition': f'attachment; filename="{filename}"'}}
+    )
+
 if __name__ == '__main__':
     # Auto-migrazione se il DB ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨ assente o vuoto
     if not DB_PATH.exists() or not tables_exist():
