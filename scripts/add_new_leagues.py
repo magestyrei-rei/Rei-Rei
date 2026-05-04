@@ -186,6 +186,16 @@ def process_fixture(conn, fixture, league_db_id, season):
 def main():
     decompress_db()
     conn = sqlite3.connect(DB_PATH)
+
+    # The original DB was created by migrate.py which has no fixture_id column.
+    # app.py adds it via ALTER TABLE on Render startup â we must do the same here.
+    try:
+        conn.execute('ALTER TABLE matches ADD COLUMN fixture_id INTEGER')
+        conn.commit()
+        print('Added fixture_id column to matches table')
+    except Exception:
+        pass  # Column already exists
+
     total_inserted = 0
 
     try:
