@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   update-db:
@@ -27,3 +28,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git add football.db.gz
           git diff --staged --quiet || (git commit -m "Add leagues batch ${{ inputs.batch }} to football.db.gz" && git pull --rebase origin main && git push)
+
+      - name: Trigger next batch
+        if: ${{ inputs.batch != '3' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT=$(( ${{ inputs.batch }} + 1 ))
+          echo "Batch ${{ inputs.batch }} done. Triggering batch $NEXT..."
+          gh workflow run add-new-leagues.yml --field batch=$NEXT
