@@ -63,6 +63,9 @@
         <label>Campionato</label>
         <select id="a-league"></select>
       </div>
+      <div style="display:flex;align-items:flex-end">
+        <a id="a-dl-btn" href="#" target="_blank" style="display:block;width:100%;padding:9px;background:#1f3b73;color:#fff;border-radius:6px;text-decoration:none;font-size:13px;text-align:center;cursor:pointer">&#11015; Scarica HTML</a>
+      </div>
       <div>
         <label>Minuto snapshot</label>
         <select id="a-min">
@@ -101,6 +104,9 @@
       <div>
         <label>Campionato</label>
         <select id="e-league"></select>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <a id="e-dl-btn" href="#" target="_blank" style="display:block;width:100%;padding:9px;background:#1f3b73;color:#fff;border-radius:6px;text-decoration:none;font-size:13px;text-align:center;cursor:pointer">&#11015; Scarica HTML</a>
       </div>
       <div>
         <label>Chi segna per primo</label>
@@ -389,6 +395,28 @@ function kpiCard(label, value) {
   return '<div class="card"><div class="lab">' + label + '</div><div class="val">' + (value!=null ? value : "?") + "</div></div>";
 }
 
+
+  // ---- Download buttons ----
+  function _updateDlBtn(prefix) {
+    const sel = document.getElementById(prefix + '-league');
+    const btn = document.getElementById(prefix + '-dl-btn');
+    if (!sel || !btn) return;
+    const lid = sel.value;
+    if (lid) {
+      btn.href = '/download/league/' + lid;
+      btn.style.opacity = '1';
+    } else {
+      btn.href = '#';
+      btn.style.opacity = '0.4';
+    }
+  }
+  document.getElementById('a-league').addEventListener('change', () => _updateDlBtn('a'));
+  document.getElementById('e-league').addEventListener('change', () => _updateDlBtn('e'));
+  // also update after leagues are loaded (hook into existing populate functions via MutationObserver)
+  ['a-league','e-league'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) new MutationObserver(() => _updateDlBtn(id[0])).observe(el, {childList: true});
+  });
 </script>
 </body>
 </html>
