@@ -799,7 +799,7 @@ def download_league(lid):
     return Response(
         html,
         mimetype='text/html',
-        headers={{'Content-Disposition': f'attachment; filename="{filename}"'}}
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
     )
 
 if __name__ == '__main__':
