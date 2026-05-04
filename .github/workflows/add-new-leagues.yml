@@ -2,6 +2,11 @@ name: Add 12 New Leagues to football.db
 
 on:
   workflow_dispatch:
+    inputs:
+      batch:
+        description: 'Batch: 1=leghe 103,104,113,114 | 2=169,240,244,328 | 3=329,479,564,596'
+        required: true
+        default: '1'
 
 permissions:
   contents: write
@@ -14,11 +19,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Add new leagues
-        run: python3 scripts/add_new_leagues.py
+        run: python3 scripts/add_new_leagues.py ${{ inputs.batch }}
 
       - name: Commit DB
         run: |
           git config user.email "actions@github.com"
           git config user.name "github-actions[bot]"
           git add football.db.gz
-          git diff --staged --quiet || (git commit -m "Add 12 new leagues to football.db.gz" && git push)
+          git diff --staged --quiet || (git commit -m "Add leagues batch ${{ inputs.batch }} to football.db.gz" && git push)
