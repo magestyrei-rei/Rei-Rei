@@ -723,13 +723,20 @@ def admin_delete_fixture():
     return jsonify({"ok": True, "deleted_fixture_id": fixture_id})
 
 
-@app.route('/download/league/<int:lid>')
-def download_league(lid):
+@app.route('/download/league/<path:league_ref>')
+def download_league(league_ref):
     """Genera e scarica un file HTML con tutte le partite early-goal di una lega."""
     from flask import Response
     from datetime import datetime
 
-    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    # Accetta sia ID numerico che nome lega
+    try:
+        lid = int(league_ref)
+        info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    except ValueError:
+        info = query("SELECT id, name FROM leagues WHERE name=?", (league_ref,))
+        if info:
+            lid = info[0]['id']
     if not info:
         return jsonify({'error': 'League not found'}), 404
     league_name = info[0]['name']
