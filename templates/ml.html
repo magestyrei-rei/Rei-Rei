@@ -446,8 +446,8 @@ function kpiCard(label, value) {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
-let _trChart = null;
-async function loadTrend() {
+var _trChart = null;
+window.loadTrend = async function() {
   // Populate league selector from a-league if empty
   const trSel = document.getElementById('tr-league');
   const aSel = document.getElementById('a-league');
