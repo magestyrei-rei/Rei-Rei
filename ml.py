@@ -376,41 +376,82 @@ def register(app, query_fn):
 
     @app.route('/api/ml-trend')
     def api_ml_trend():
-        """Trend ML per campionato: n_matches e confidence del modello per stagione."""
+        """Trend training: n_matches e confidence del modello per stagione."""
         league_name = request.args.get('league', '').strip()
         alpha = 3.0
         if league_name:
             rows = query_fn("""
                 SELECT COALESCE(m.season, 'N/D') as season, COUNT(*) as n
-                FROM matches m
-                JOIN leagues l ON l.id = m.league_id
-                WHERE l.name = ?
-                GROUP BY COALESCE(m.season, 'N/D')
-                ORDER BY COALESCE(m.season, 'N/D')
+                FROM matches m JOIN leagues l ON l.id = m.league_id
+                WHERE l.name = ? GROUP BY COALESCE(m.season,'N/D')
+                ORDER BY COALESCE(m.season,'N/D')
             """, (league_name,))
         else:
             rows = query_fn("""
-                SELECT COALESCE(season, 'N/D') as season, COUNT(*) as n
-                FROM matches
-                GROUP BY COALESCE(season, 'N/D')
-                ORDER BY COALESCE(season, 'N/D')
+                SELECT COALESCE(season,'N/D') as season, COUNT(*) as n FROM matches
+                GROUP BY COALESCE(season,'N/D') ORDER BY COALESCE(season,'N/D')
             """)
         cumulative = 0
         seasons_out = []
         for row in rows:
             cumulative += row['n']
             confidence = round((1.0 - alpha / (cumulative + alpha)) * 100, 1)
-            seasons_out.append({
-                'season': row['season'],
-                'n_season': row['n'],
-                'n_cumulative': cumulative,
-                'confidence': confidence,
-            })
-        return jsonify({
-            'league': league_name,
-            'alpha': alpha,
-            'seasons': seasons_out,
-        })
+            seasons_out.append({'season': row['season'], 'n_season': row['n'],
+                                 'n_cumulative': cumulative, 'confidence': confidence})
+        return jsonify({'league': league_name, 'alpha': alpha, 'seasons': seasons_out})
+
+    @app.route('/api/ml-picks-stats')
+    def api_ml_picks_stats():
+        """Statistiche predizioni per campionato da predictions_log (471+ partite settled)."""
+        league_name = request.args.get('league', '').strip()
+        try:
+            import predictions_settlement as pset
+            if league_name:
+                rows = pset._turso_select_rows(
+                    "SELECT season, date_utc, ft_home, ft_away, ht_home, ht_away, first_goal_minute "
+                    "FROM predictions_log WHERE league_name=? AND ft_home IS NOT NULL AND ft_away IS NOT NULL "
+                    "ORDER BY date_utc",
+                    [league_name]
+                )
+            else:
+                rows = pset._turso_select_rows(
+                    "SELECT season, date_utc, league_name, ft_home, ft_away, ht_home, ht_away, first_goal_minute "
+                    "FROM predictions_log WHERE ft_home IS NOT NULL AND ft_away IS NOT NULL ORDER BY date_utc"
+                )
+        except Exception as e:
+            return jsonify({'error': str(e), 'league': league_name, 'seasons': [], 'total': 0})
+
+        if not rows:
+            return jsonify({'league': league_name, 'seasons': [], 'rolling': [], 'total': 0})
+
+        def o25(m): ft = (m.get('ft_home') or 0) + (m.get('ft_away') or 0); return None if m.get('ft_home') is None else (1 if ft > 2 else 0)
+        def o15(m): ft = (m.get('ft_home') or 0) + (m.get('ft_away') or 0); return None if m.get('ft_home') is None else (1 if ft > 1 else 0)
+        def btts(m): return None if m.get('ft_home') is None else (1 if (m.get('ft_home') or 0) > 0 and (m.get('ft_away') or 0) > 0 else 0)
+        def eg(m): fgm = m.get('first_goal_minute'); return None if fgm is None else (1 if fgm <= 16 else 0)
+        def _rate(ms, fn): vals = [fn(x) for x in ms if fn(x) is not None]; return round(sum(vals)/len(vals)*100,1) if vals else None
+
+        from collections import defaultdict
+        by_season = defaultdict(list)
+        for r in rows:
+            by_season[str(r.get('season') or 'N/D')].append(r)
+
+        seasons_out = []
+        cum = 0
+        for s in sorted(by_season.keys()):
+            ms = by_season[s]; cum += len(ms)
+            seasons_out.append({'season': s, 'n': len(ms), 'n_cum': cum,
+                'over_1_5': _rate(ms, o15), 'over_2_5': _rate(ms, o25),
+                'btts': _rate(ms, btts), 'early_goal': _rate(ms, eg)})
+
+        win = 10
+        rolling = []
+        for i in range(win - 1, len(rows)):
+            batch = rows[max(0, i - win + 1): i + 1]
+            rolling.append({'n': i + 1, 'date': (rows[i].get('date_utc') or '')[:10],
+                'over_2_5': _rate(batch, o25), 'btts': _rate(batch, btts), 'early_goal': _rate(batch, eg)})
+
+        return jsonify({'league': league_name, 'total': len(rows),
+                        'seasons': seasons_out, 'rolling': rolling[-50:]})
 
     def _get_adv_data():
         """Provider usato da ml_pick: ritorna adv_data con la stessa cache di /api/ml-advanced."""
