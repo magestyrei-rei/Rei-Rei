@@ -149,15 +149,27 @@
   </section>
 
   <section class="view" id="view-trend">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-    <select id="t-league" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:14px"></select>
-    <button onclick="loadTrend()" style="padding:6px 18px;border-radius:6px;background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600">↻ Aggiorna</button>
+  <!-- KPI bar -->
+  <div id="tr-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+
+  <!-- Controls -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <select id="tr-league" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:14px"></select>
+    <select id="tr-chart-type" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px">
+      <option value="season">Per stagione</option>
+      <option value="rolling">Rolling (ultimi 10)</option>
+    </select>
+    <button onclick="loadTrend()" style="padding:6px 18px;border-radius:6px;background:#1d4ed8;color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600">↻ Aggiorna</button>
   </div>
-  <div id="t-meta" style="font-size:13px;color:#6b7280;margin-bottom:14px;min-height:18px"></div>
-  <div style="position:relative;height:320px;margin-bottom:20px">
-    <canvas id="t-chart"></canvas>
+  <div id="tr-meta" style="font-size:13px;color:#6b7280;margin-bottom:12px;min-height:18px"></div>
+
+  <!-- Chart -->
+  <div style="position:relative;height:300px;margin-bottom:20px">
+    <canvas id="tr-chart"></canvas>
   </div>
-  <div id="t-table" style="overflow-x:auto"></div>
+
+  <!-- Table -->
+  <div id="tr-table" style="overflow-x:auto"></div>
 </section>
 
 <section class="view" id="view-how">
@@ -434,78 +446,120 @@ function kpiCard(label, value) {
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
-let _tChart = null;
+let _trChart = null;
 async function loadTrend() {
-  const tSel = document.getElementById('t-league');
+  // Populate league selector from a-league if empty
+  const trSel = document.getElementById('tr-league');
   const aSel = document.getElementById('a-league');
-  if (tSel.options.length === 0 && aSel) {
+  if (trSel.options.length === 0 && aSel) {
     Array.from(aSel.options).forEach(o => {
       const opt = document.createElement('option');
       opt.value = o.value; opt.textContent = o.textContent;
-      tSel.appendChild(opt);
+      trSel.appendChild(opt);
     });
   }
-  const league = tSel.value || '';
-  const meta = document.getElementById('t-meta');
-  const tableEl = document.getElementById('t-table');
+  const league = trSel.value || '';
+  const chartType = document.getElementById('tr-chart-type').value;
+  const meta = document.getElementById('tr-meta');
+  const kpisEl = document.getElementById('tr-kpis');
+  const tableEl = document.getElementById('tr-table');
   meta.textContent = 'Caricamento dati...';
+  kpisEl.innerHTML = ''; tableEl.innerHTML = '';
+
   try {
-    const r = await fetch('/api/ml-trend?league=' + encodeURIComponent(league));
+    const r = await fetch('/api/ml-picks-stats?league=' + encodeURIComponent(league));
     const d = await r.json();
+    if (d.error) { meta.textContent = 'Errore: ' + d.error; return; }
+
     const seasons = d.seasons || [];
-    const total = seasons.length ? seasons[seasons.length-1].n_cumulative : 0;
-    const lastConf = seasons.length ? seasons[seasons.length-1].confidence : 0;
-    const cc = c => c >= 90 ? '#16a34a' : c >= 70 ? '#d97706' : '#dc2626';
-    meta.innerHTML = '<strong>' + (d.league || 'Tutti i campionati') + '</strong>' +
-      ' &mdash; Stagioni: <strong>' + seasons.length + '</strong>' +
-      ' &mdash; Partite totali: <strong>' + total + '</strong>' +
-      ' &mdash; Confidenza attuale: <strong style="color:' + cc(lastConf) + '">' + lastConf + '%</strong>';
-    const ctx = document.getElementById('t-chart').getContext('2d');
-    if (_tChart) { _tChart.destroy(); _tChart = null; }
-    _tChart = new Chart(ctx, {
+    const rolling = d.rolling || [];
+    const total = d.total || 0;
+
+    // KPIs from latest season
+    const all = seasons.reduce((a,s) => ({
+      n: (a.n||0)+s.n,
+      o25: s.over_2_5 != null ? s.over_2_5 : a.o25,
+      btts: s.btts != null ? s.btts : a.btts,
+      eg: s.early_goal != null ? s.early_goal : a.eg
+    }), {});
+    // Overall rates across all seasons
+    const totN = seasons.reduce((a,s)=>a+s.n,0);
+    const avgO25 = totN ? Math.round(seasons.filter(s=>s.over_2_5!=null).reduce((a,s)=>a+s.over_2_5*s.n,0)/totN*10)/10 : null;
+    const avgBtts = totN ? Math.round(seasons.filter(s=>s.btts!=null).reduce((a,s)=>a+s.btts*s.n,0)/totN*10)/10 : null;
+    const avgEg = totN ? Math.round(seasons.filter(s=>s.early_goal!=null).reduce((a,s)=>a+s.early_goal*s.n,0)/totN*10)/10 : null;
+
+    const kpiData = [
+      {label:'Partite analizzate', val: total, color:'#1d4ed8', icon:'📊'},
+      {label:'Over 2.5 %', val: avgO25 != null ? avgO25+'%' : 'N/D', color:'#7c3aed', icon:'⚽'},
+      {label:'BTTS %', val: avgBtts != null ? avgBtts+'%' : 'N/D', color:'#0891b2', icon:'🎯'},
+      {label:'Gol <16' %', val: avgEg != null ? avgEg+'%' : 'N/D', color:'#16a34a', icon:'⚡'}
+    ];
+    kpisEl.innerHTML = kpiData.map(k =>
+      '<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">' +
+      '<div style="font-size:20px">' + k.icon + '</div>' +
+      '<div style="font-size:22px;font-weight:700;color:' + k.color + ';margin:4px 0">' + k.val + '</div>' +
+      '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">' + k.label + '</div>' +
+      '</div>'
+    ).join('');
+
+    meta.textContent = (league || 'Tutti i campionati') + ' — ' + seasons.length + ' stagioni — ' + total + ' partite analizzate';
+
+    // Chart datasets
+    const ctx = document.getElementById('tr-chart').getContext('2d');
+    if (_trChart) { _trChart.destroy(); _trChart = null; }
+
+    const data = chartType === 'rolling' ? rolling : seasons;
+    const labels = chartType === 'rolling'
+      ? data.map(r => r.date || 'N/D')
+      : data.map(s => s.season);
+
+    _trChart = new Chart(ctx, {
+      type: 'line',
       data: {
-        labels: seasons.map(s => s.season),
+        labels,
         datasets: [
-          { type: 'bar', label: 'Partite per stagione', data: seasons.map(s => s.n_season),
-            backgroundColor: 'rgba(37,99,235,0.55)', borderColor: 'rgba(37,99,235,0.8)',
-            borderWidth: 1, yAxisID: 'yN' },
-          { type: 'line', label: 'Confidenza modello %', data: seasons.map(s => s.confidence),
-            borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.12)',
-            yAxisID: 'yC', tension: 0.35, pointRadius: 5, pointBackgroundColor: '#16a34a', fill: true }
+          { label: 'Over 2.5 %', data: data.map(r => r.over_2_5),
+            borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,0.1)', tension:0.35, pointRadius:4, fill:true },
+          { label: 'BTTS %', data: data.map(r => r.btts),
+            borderColor:'#0891b2', backgroundColor:'rgba(8,145,178,0.08)', tension:0.35, pointRadius:4, fill:false },
+          { label: 'Gol < 16' %', data: data.map(r => r.early_goal),
+            borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.08)', tension:0.35, pointRadius:4, fill:false }
         ]
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'top' },
-          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y + (ctx.dataset.yAxisID === 'yC' ? '%' : '') } }
-        },
-        scales: {
-          yN: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Partite' }, grid: { color: 'rgba(0,0,0,0.06)' } },
-          yC: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: 'Confidenza %' }, grid: { drawOnChartArea: false } }
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{ legend:{ position:'top' },
+          tooltip:{ callbacks:{ label: c => c.dataset.label+': '+(c.parsed.y!=null?c.parsed.y+'%':'N/D') } } },
+        scales:{
+          y:{ min:0, max:100, title:{ display:true, text:'% partite' }, grid:{ color:'rgba(0,0,0,0.06)' } },
+          x:{ ticks:{ maxRotation:45 } }
         }
       }
     });
-    let tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead>' +
-      '<tr style="background:#f1f5f9;font-weight:600">' +
-      '<th style="padding:7px 12px;text-align:left;border-bottom:2px solid #e2e8f0">Stagione</th>' +
-      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Partite</th>' +
-      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Cumulativo</th>' +
-      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Confidenza</th>' +
-      '</tr></thead><tbody>';
-    seasons.forEach((s, i) => {
-      const bg = i % 2 === 0 ? '' : 'background:#f8fafc';
-      tbl += '<tr style="' + bg + '"><td style="padding:6px 12px;border-bottom:1px solid #f1f5f9">' + s.season + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n_season + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n_cumulative + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9;color:' + cc(s.confidence) + ';font-weight:600">' + s.confidence + '%</td></tr>';
+
+    // Table
+    let tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+      '<thead><tr style="background:#1d4ed8;color:#fff;font-weight:600">' +
+      ['Stagione','Partite','Over 2.5','BTTS','Gol <16''].map(h =>
+        '<th style="padding:8px 12px;text-align:'+(h==='Stagione'||h==='Partite'?'left':'right')+';white-space:nowrap">'+h+'</th>'
+      ).join('') + '</tr></thead><tbody>';
+
+    seasons.forEach((s,i) => {
+      const bg = i%2===0 ? '' : 'background:#f8fafc';
+      const pct = v => v != null ? '<span style="color:'+(v>=60?'#16a34a':v>=45?'#d97706':'#dc2626')+'">'+v+'%</span>' : '<span style="color:#9ca3af">N/D</span>';
+      tbl += '<tr style="'+bg+'">'+
+        '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">'+s.season+'</td>'+
+        '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">'+s.n+'</td>'+
+        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.over_2_5)+'</td>'+
+        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.btts)+'</td>'+
+        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.early_goal)+'</td>'+
+        '</tr>';
     });
     tbl += '</tbody></table>';
     tableEl.innerHTML = tbl;
+
   } catch(e) { meta.textContent = 'Errore: ' + e.message; }
 }
 </script>
 </body>
-</html>
-
