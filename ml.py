@@ -373,6 +373,45 @@ def register(app, query_fn):
             _ML_CACHE['adv_ts'] = now
         return jsonify(_ML_CACHE['adv_data'])
 
+
+    @app.route('/api/ml-trend')
+    def api_ml_trend():
+        """Trend ML per campionato: n_matches e confidence del modello per stagione."""
+        league_name = request.args.get('league', '').strip()
+        alpha = 3.0
+        if league_name:
+            rows = query_fn("""
+                SELECT COALESCE(m.season, 'N/D') as season, COUNT(*) as n
+                FROM matches m
+                JOIN leagues l ON l.id = m.league_id
+                WHERE l.name = ?
+                GROUP BY COALESCE(m.season, 'N/D')
+                ORDER BY COALESCE(m.season, 'N/D')
+            """, (league_name,))
+        else:
+            rows = query_fn("""
+                SELECT COALESCE(season, 'N/D') as season, COUNT(*) as n
+                FROM matches
+                GROUP BY COALESCE(season, 'N/D')
+                ORDER BY COALESCE(season, 'N/D')
+            """)
+        cumulative = 0
+        seasons_out = []
+        for row in rows:
+            cumulative += row['n']
+            confidence = round((1.0 - alpha / (cumulative + alpha)) * 100, 1)
+            seasons_out.append({
+                'season': row['season'],
+                'n_season': row['n'],
+                'n_cumulative': cumulative,
+                'confidence': confidence,
+            })
+        return jsonify({
+            'league': league_name,
+            'alpha': alpha,
+            'seasons': seasons_out,
+        })
+
     def _get_adv_data():
         """Provider usato da ml_pick: ritorna adv_data con la stessa cache di /api/ml-advanced."""
         now = time.time()
