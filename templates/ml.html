@@ -54,6 +54,7 @@
     <div class="tab" data-view="eg">Early-goal (legacy)</div>
     <div class="tab" data-view="picks">Pick Live</div>
     <div class="tab" data-view="acc">ML Accuracy</div>
+    <div class="tab" data-view="trend">📈 Trend ML</div>
     <div class="tab" data-view="how">Come funziona</div>
   </div>
 
@@ -147,7 +148,19 @@
     <div id="a-note" class="notes" style="display:none;margin-top:14px"></div>
   </section>
 
-  <section class="view" id="view-how">
+  <section class="view" id="view-trend">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <select id="t-league" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:14px"></select>
+    <button onclick="loadTrend()" style="padding:6px 18px;border-radius:6px;background:#2563eb;color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600">↻ Aggiorna</button>
+  </div>
+  <div id="t-meta" style="font-size:13px;color:#6b7280;margin-bottom:14px;min-height:18px"></div>
+  <div style="position:relative;height:320px;margin-bottom:20px">
+    <canvas id="t-chart"></canvas>
+  </div>
+  <div id="t-table" style="overflow-x:auto"></div>
+</section>
+
+<section class="view" id="view-how">
     <div class="notes" style="line-height:1.7;font-size:13px">
       <h2 style="margin:0 0 14px;color:#f1f5f9;font-size:18px">Come funziona il ML Predictor</h2>
       <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Live (minuto + score)"</h3>
@@ -258,6 +271,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "eg" && !EG) loadEG();
     if (t.dataset.view === "picks") loadPicks();
     if (t.dataset.view === "acc") loadAccuracy();
+    if (t.dataset.view == "trend") loadTrend();
   });
 });
 
@@ -417,6 +431,80 @@ function kpiCard(label, value) {
     const el = document.getElementById(id);
     if (el) new MutationObserver(() => _updateDlBtn(id[0])).observe(el, {childList: true});
   });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+let _tChart = null;
+async function loadTrend() {
+  const tSel = document.getElementById('t-league');
+  const aSel = document.getElementById('a-league');
+  if (tSel.options.length === 0 && aSel) {
+    Array.from(aSel.options).forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o.value; opt.textContent = o.textContent;
+      tSel.appendChild(opt);
+    });
+  }
+  const league = tSel.value || '';
+  const meta = document.getElementById('t-meta');
+  const tableEl = document.getElementById('t-table');
+  meta.textContent = 'Caricamento dati...';
+  try {
+    const r = await fetch('/api/ml-trend?league=' + encodeURIComponent(league));
+    const d = await r.json();
+    const seasons = d.seasons || [];
+    const total = seasons.length ? seasons[seasons.length-1].n_cumulative : 0;
+    const lastConf = seasons.length ? seasons[seasons.length-1].confidence : 0;
+    const cc = c => c >= 90 ? '#16a34a' : c >= 70 ? '#d97706' : '#dc2626';
+    meta.innerHTML = '<strong>' + (d.league || 'Tutti i campionati') + '</strong>' +
+      ' &mdash; Stagioni: <strong>' + seasons.length + '</strong>' +
+      ' &mdash; Partite totali: <strong>' + total + '</strong>' +
+      ' &mdash; Confidenza attuale: <strong style="color:' + cc(lastConf) + '">' + lastConf + '%</strong>';
+    const ctx = document.getElementById('t-chart').getContext('2d');
+    if (_tChart) { _tChart.destroy(); _tChart = null; }
+    _tChart = new Chart(ctx, {
+      data: {
+        labels: seasons.map(s => s.season),
+        datasets: [
+          { type: 'bar', label: 'Partite per stagione', data: seasons.map(s => s.n_season),
+            backgroundColor: 'rgba(37,99,235,0.55)', borderColor: 'rgba(37,99,235,0.8)',
+            borderWidth: 1, yAxisID: 'yN' },
+          { type: 'line', label: 'Confidenza modello %', data: seasons.map(s => s.confidence),
+            borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.12)',
+            yAxisID: 'yC', tension: 0.35, pointRadius: 5, pointBackgroundColor: '#16a34a', fill: true }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y + (ctx.dataset.yAxisID === 'yC' ? '%' : '') } }
+        },
+        scales: {
+          yN: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: 'Partite' }, grid: { color: 'rgba(0,0,0,0.06)' } },
+          yC: { type: 'linear', position: 'right', min: 0, max: 100, title: { display: true, text: 'Confidenza %' }, grid: { drawOnChartArea: false } }
+        }
+      }
+    });
+    let tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead>' +
+      '<tr style="background:#f1f5f9;font-weight:600">' +
+      '<th style="padding:7px 12px;text-align:left;border-bottom:2px solid #e2e8f0">Stagione</th>' +
+      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Partite</th>' +
+      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Cumulativo</th>' +
+      '<th style="padding:7px 12px;text-align:right;border-bottom:2px solid #e2e8f0">Confidenza</th>' +
+      '</tr></thead><tbody>';
+    seasons.forEach((s, i) => {
+      const bg = i % 2 === 0 ? '' : 'background:#f8fafc';
+      tbl += '<tr style="' + bg + '"><td style="padding:6px 12px;border-bottom:1px solid #f1f5f9">' + s.season + '</td>' +
+        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n_season + '</td>' +
+        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n_cumulative + '</td>' +
+        '<td style="padding:6px 12px;text-align:right;border-bottom:1px solid #f1f5f9;color:' + cc(s.confidence) + ';font-weight:600">' + s.confidence + '%</td></tr>';
+    });
+    tbl += '</tbody></table>';
+    tableEl.innerHTML = tbl;
+  } catch(e) { meta.textContent = 'Errore: ' + e.message; }
+}
 </script>
 </body>
 </html>
