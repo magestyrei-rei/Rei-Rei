@@ -212,6 +212,79 @@ DDL_INDEX_LEAGUE = "CREATE INDEX IF NOT EXISTS idx_pl_league ON predictions_log(
 DDL_INDEX_SETTLED = "CREATE INDEX IF NOT EXISTS idx_pl_settled ON predictions_log(settled_ts)"
 DDL_INDEX_FGM = "CREATE INDEX IF NOT EXISTS idx_pl_fgm ON predictions_log(first_goal_minute)"
 
+# ---------- ml_picks_log: traccia i pick effettivi del modello ML ----------
+DDL_PICKS_LOG = """
+CREATE TABLE IF NOT EXISTS ml_picks_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fixture_id INTEGER NOT NULL,
+  league_name TEXT,
+  home_team TEXT,
+  away_team TEXT,
+  market TEXT NOT NULL,
+  model_prob REAL,
+  bookie_quota REAL,
+  edge_pct REAL,
+  logged_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+  ft_home INTEGER,
+  ft_away INTEGER,
+  result TEXT,
+  settled_at INTEGER,
+  UNIQUE(fixture_id, market)
+)
+""".strip()
+
+def _ensure_picks_ddl():
+    _turso_execute(DDL_PICKS_LOG)
+
+def log_picks(fixture_id, ctx, picks):
+    """Salva pick ML per una fixture. UNIQUE(fixture_id,market) ignora duplicati."""
+    try:
+        _ensure_picks_ddl()
+        for p in (picks or []):
+            _turso_execute(
+                "INSERT OR IGNORE INTO ml_picks_log "
+                "(fixture_id, league_name, home_team, away_team, market, model_prob, bookie_quota, edge_pct) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                [fixture_id, ctx.get('league_name'), ctx.get('home'), ctx.get('away'),
+                 p.get('market'), p.get('model_prob'),
+                 p.get('quota') or p.get('bookie_quota'), p.get('edge_pct')]
+            )
+    except Exception:
+        pass
+
+def _settle_picks(fixture_id, ft_home, ft_away):
+    """Marca WIN/LOSS i pick di questa fixture dopo il risultato FT."""
+    if ft_home is None or ft_away is None:
+        return
+    try:
+        _ensure_picks_ddl()
+        picks = _turso_select_rows(
+            "SELECT id, market FROM ml_picks_log WHERE fixture_id=? AND result IS NULL",
+            [fixture_id]
+        )
+        if not picks:
+            return
+        total = ft_home + ft_away
+        btts = ft_home > 0 and ft_away > 0
+        now = int(time.time())
+        wins_map = {
+            'over_1_5': total > 1, 'over_2_5': total > 2, 'over_3_5': total > 3,
+            'under_1_5': total < 2, 'under_2_5': total < 3, 'under_3_5': total < 4,
+            'btts_si': btts, 'btts_no': not btts,
+            '1': ft_home > ft_away, 'X': ft_home == ft_away, '2': ft_away > ft_home,
+        }
+        for p in picks:
+            mkt = (p.get('market') or '')
+            if mkt not in wins_map:
+                continue
+            res = 'WIN' if wins_map[mkt] else 'LOSS'
+            _turso_execute(
+                "UPDATE ml_picks_log SET result=?,ft_home=?,ft_away=?,settled_at=? WHERE id=?",
+                [res, ft_home, ft_away, now, p['id']]
+            )
+    except Exception:
+        pass
+
 
 def _ensure_ddl():
     _turso_execute(DDL)
@@ -256,6 +329,8 @@ def _upsert(rec):
         int(time.time()),
     ]
     _turso_execute(sql, args)
+    # Settle picks per questa fixture
+    _settle_picks(rec['fixture_id'], rec.get('ft_home'), rec.get('ft_away'))
 
 
 def settle_batch(limit=30, max_age_days=7):
@@ -359,6 +434,39 @@ def register(app):
             max_age = 7
         res = settle_batch(limit=limit, max_age_days=max_age)
         return jsonify(res)
+
+    @app.route('/api/ml-picks-accuracy')
+    def api_ml_picks_accuracy():
+        """Accuratezza pick ML reali (WIN/LOSS per mercato) da ml_picks_log."""
+        try:
+            _ensure_picks_ddl()
+            by_market = _turso_select_rows(
+                "SELECT market, COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins "
+                "FROM ml_picks_log WHERE result IS NOT NULL GROUP BY market ORDER BY total DESC"
+            )
+            by_league = _turso_select_rows(
+                "SELECT league_name, COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins "
+                "FROM ml_picks_log WHERE result IS NOT NULL AND league_name IS NOT NULL "
+                "GROUP BY league_name ORDER BY total DESC LIMIT 20"
+            )
+            recent = _turso_select_rows(
+                "SELECT fixture_id, league_name, home_team, away_team, market, "
+                "model_prob, edge_pct, result, ft_home, ft_away, logged_at "
+                "FROM ml_picks_log ORDER BY logged_at DESC LIMIT 30"
+            )
+            pending_r = _turso_select_rows("SELECT COUNT(*) as n FROM ml_picks_log WHERE result IS NULL")
+            total_r = _turso_select_rows("SELECT COUNT(*) as n FROM ml_picks_log")
+            return jsonify({
+                'by_market': by_market or [],
+                'by_league': by_league or [],
+                'recent': recent or [],
+                'pending': (pending_r or [{}])[0].get('n', 0),
+                'total_logged': (total_r or [{}])[0].get('n', 0),
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
 
     @app.route('/api/predictions-log-stats')
     def predictions_log_stats():
