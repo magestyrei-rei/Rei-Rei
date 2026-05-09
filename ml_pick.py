@@ -696,6 +696,16 @@ def register_picks_ui(app, get_adv_data):
                 if not lg_data: continue
                 probs, _ = _extract_probs(lg_data, m, sh, sa)
                 if not probs: continue
+                # Escludi mercati già decisi dal punteggio corrente
+                # (il modello usa prob FT storica, ma la quota live si riferisce ai gol rimanenti)
+                _settled = set()
+                _tot = sh + sa
+                if _tot >= 2: _settled.update(['over_1_5', 'under_1_5'])
+                if _tot >= 3: _settled.update(['over_2_5', 'under_2_5'])
+                if _tot >= 4: _settled.update(['over_3_5', 'under_3_5'])
+                if sh > 0 and sa > 0: _settled.update(['btts_si', 'btts_no'])
+                probs = {k: v for k, v in probs.items() if k not in _settled}
+                if not probs: continue
                 raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital)
                 _label_map = dict(_PICKS_MARKET_LABELS)
                 picks = [{'market': rp['market'], 'market_label': _label_map.get(rp['market'], rp['market']), 'prob': rp['model_prob'], 'fair_quota': round(1.0/rp['model_prob'], 3) if rp['model_prob'] > 0 else 0, 'bookie': rp['bookie'], 'bookie_quota': rp['quota'], 'edge_pct': rp['edge_pct'], 'stake_pct': round(rp['stake_pct']*100.0, 2), 'stake_eur': rp['stake_eur']} for rp in raw_picks]
