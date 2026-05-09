@@ -558,6 +558,14 @@ def register(app, adv_data_provider):
         # 5) Compute picks
         picks = _compute_picks(probs, odds_by_market, bookie, kelly_mult, edge_min, stake_max, capital)
 
+        # Log picks best-effort
+        if picks:
+            try:
+                import predictions_settlement as _pset
+                _pset.log_picks(fixture, ctx, picks)
+            except Exception:
+                pass
+
         return jsonify({
             'fixture': fixture,
             'ctx': ctx,
@@ -669,6 +677,13 @@ def register_picks_ui(app, get_adv_data):
                     picks.append({'market': mk, 'market_label': ml, 'prob': round(p, 4), 'fair_quota': round(1.0/p, 3), 'bookie': bk, 'bookie_quota': round(q, 3), 'edge_pct': round(ed*100.0, 2), 'stake_pct': round(fk*100.0, 2), 'stake_eur': round(capital*fk, 2)})
                 if not picks: continue
                 picks.sort(key=lambda x: -x['edge_pct'])
+                # Log picks best-effort
+                try:
+                    import predictions_settlement as _pset
+                    _lctx = {'league_name': ctx.get('league_name'), 'home': ctx.get('home'), 'away': ctx.get('away')}
+                    _pset.log_picks(fid, _lctx, picks[:6])
+                except Exception:
+                    pass
                 results.append({'fixture_id': fid, 'league_id': lid, 'league_name': ctx.get('league_name'), 'country': ctx.get('country'), 'home': ctx.get('home_team_name'), 'away': ctx.get('away_team_name'), 'minute': m, 'score': '%d-%d' % (sh, sa), 'picks': picks[:6]})
             except Exception:
                 continue
