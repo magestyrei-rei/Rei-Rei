@@ -47,6 +47,8 @@ LEAGUE_WHITELIST = {
     239, 253, 265, 268, 270, 281, 283, 286,
     292, 293, 299, 345, 346, 373, 383, 408,
     942, 943,
+    # Aggiunte 2026-05-10 (10 leghe mancanti n8n → totale 77)
+    185, 193, 786, 800, 802, 823, 865, 882, 936, 1084,
 }
 
 # ----- In-memory ring buffer (fallback / test) -----
