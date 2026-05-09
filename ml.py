@@ -472,7 +472,7 @@ def register(app, query_fn):
         except Exception as e:
             return jsonify({'error': str(e), 'leagues': []})
 
-        def _get_adv_data():
+    def _get_adv_data():
         """Provider usato da ml_pick: ritorna adv_data con la stessa cache di /api/ml-advanced."""
         now = time.time()
         if _ML_CACHE['adv_data'] is None or (now - _ML_CACHE['adv_ts']) > _ML_TTL:
