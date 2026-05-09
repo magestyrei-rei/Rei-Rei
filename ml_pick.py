@@ -662,19 +662,16 @@ def register_picks_ui(app, get_adv_data):
                 except Exception: odds = None
                 parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
                 if not parsed: continue
-                try: adv = get_adv_data(lid, m, sh, sa)
-                except Exception: adv = None
-                mps = _picks_model_probs(adv)
-                if not mps: continue
-                picks = []
-                for mk, ml in _PICKS_MARKET_LABELS:
-                    p = mps.get(mk)
-                    if not p: continue
-                    bk, q = _picks_best_quota(parsed, mk)
-                    if not bk or not q or q <= 1.0: continue
-                    fk, ed = _kelly_fraction(p, q, kelly, stake_max)
-                    if ed < edge_min: continue
-                    picks.append({'market': mk, 'market_label': ml, 'prob': round(p, 4), 'fair_quota': round(1.0/p, 3), 'bookie': bk, 'bookie_quota': round(q, 3), 'edge_pct': round(ed*100.0, 2), 'stake_pct': round(fk*100.0, 2), 'stake_eur': round(capital*fk, 2)})
+                try:
+                    adv_data = get_adv_data()
+                    lg_key, lg_data = _find_league_in_model(adv_data, lid, ctx.get('league_name'), ctx.get('country'))
+                except Exception: lg_data = None
+                if not lg_data: continue
+                probs, _ = _extract_probs(lg_data, m, sh, sa)
+                if not probs: continue
+                raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital)
+                _label_map = dict(_PICKS_MARKET_LABELS)
+                picks = [{'market': rp['market'], 'market_label': _label_map.get(rp['market'], rp['market']), 'prob': rp['model_prob'], 'fair_quota': round(1.0/rp['model_prob'], 3) if rp['model_prob'] > 0 else 0, 'bookie': rp['bookie'], 'bookie_quota': rp['quota'], 'edge_pct': rp['edge_pct'], 'stake_pct': round(rp['stake_pct']*100.0, 2), 'stake_eur': rp['stake_eur']} for rp in raw_picks]
                 if not picks: continue
                 picks.sort(key=lambda x: -x['edge_pct'])
                 # Log picks best-effort
