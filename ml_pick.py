@@ -704,7 +704,9 @@ def register_picks_ui(app, get_adv_data):
                 if _tot >= 3: _settled.update(['over_2_5', 'under_2_5'])
                 if _tot >= 4: _settled.update(['over_3_5', 'under_3_5'])
                 if sh > 0 and sa > 0: _settled.update(['btts_si', 'btts_no'])
-                probs = {k: v for k, v in probs.items() if k not in _settled}
+                # Solo 1X2 e BTTS: evita mismatch FT-totale vs gol-rimanenti per over/under
+                _live_valid = {'1', 'X', '2', 'btts_si', 'btts_no', 'dc_1X', 'dc_12', 'dc_X2'}
+                probs = {k: v for k, v in probs.items() if k in _live_valid and k not in _settled}
                 if not probs: continue
                 raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital)
                 _label_map = dict(_PICKS_MARKET_LABELS)
