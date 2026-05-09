@@ -38,6 +38,7 @@
   .notes{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-top:18px;font-size:12px;color:#94a3b8;line-height:1.5}
   .notes b{color:#e2e8f0}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
@@ -443,123 +444,127 @@ function kpiCard(label, value) {
     const el = document.getElementById(id);
     if (el) new MutationObserver(() => _updateDlBtn(id[0])).observe(el, {childList: true});
   });
-</script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script>
+
+// ── Trend ML: monitoraggio predizioni per campionato ──
 var _trChart = null;
-window.loadTrend = async function() {
-  // Populate league selector from a-league if empty
-  const trSel = document.getElementById('tr-league');
-  const aSel = document.getElementById('a-league');
-  if (trSel.options.length === 0 && aSel) {
-    Array.from(aSel.options).forEach(o => {
-      const opt = document.createElement('option');
-      opt.value = o.value; opt.textContent = o.textContent;
+function loadTrend() {
+  var trSel = document.getElementById('tr-league');
+  var aSel = document.getElementById('a-league');
+  if (trSel && trSel.options.length === 0 && aSel) {
+    for (var i = 0; i < aSel.options.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = aSel.options[i].value;
+      opt.textContent = aSel.options[i].textContent;
       trSel.appendChild(opt);
-    });
+    }
   }
-  const league = trSel.value || '';
-  const chartType = document.getElementById('tr-chart-type').value;
-  const meta = document.getElementById('tr-meta');
-  const kpisEl = document.getElementById('tr-kpis');
-  const tableEl = document.getElementById('tr-table');
-  meta.textContent = 'Caricamento dati...';
-  kpisEl.innerHTML = ''; tableEl.innerHTML = '';
+  var league = trSel ? trSel.value || '' : '';
+  var chartType = document.getElementById('tr-chart-type') ? document.getElementById('tr-chart-type').value : 'season';
+  var meta = document.getElementById('tr-meta');
+  var kpisEl = document.getElementById('tr-kpis');
+  var tableEl = document.getElementById('tr-table');
+  if (meta) meta.textContent = 'Caricamento dati...';
+  if (kpisEl) kpisEl.innerHTML = '';
+  if (tableEl) tableEl.innerHTML = '';
 
-  try {
-    const r = await fetch('/api/ml-picks-stats?league=' + encodeURIComponent(league));
-    const d = await r.json();
-    if (d.error) { meta.textContent = 'Errore: ' + d.error; return; }
+  fetch('/api/ml-picks-stats?league=' + encodeURIComponent(league))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { if (meta) meta.textContent = 'Errore: ' + d.error; return; }
+      var seasons = d.seasons || [];
+      var rolling = d.rolling || [];
+      var total = d.total || 0;
 
-    const seasons = d.seasons || [];
-    const rolling = d.rolling || [];
-    const total = d.total || 0;
-
-    // KPIs from latest season
-    const all = seasons.reduce((a,s) => ({
-      n: (a.n||0)+s.n,
-      o25: s.over_2_5 != null ? s.over_2_5 : a.o25,
-      btts: s.btts != null ? s.btts : a.btts,
-      eg: s.early_goal != null ? s.early_goal : a.eg
-    }), {});
-    // Overall rates across all seasons
-    const totN = seasons.reduce((a,s)=>a+s.n,0);
-    const avgO25 = totN ? Math.round(seasons.filter(s=>s.over_2_5!=null).reduce((a,s)=>a+s.over_2_5*s.n,0)/totN*10)/10 : null;
-    const avgBtts = totN ? Math.round(seasons.filter(s=>s.btts!=null).reduce((a,s)=>a+s.btts*s.n,0)/totN*10)/10 : null;
-    const avgEg = totN ? Math.round(seasons.filter(s=>s.early_goal!=null).reduce((a,s)=>a+s.early_goal*s.n,0)/totN*10)/10 : null;
-
-    const kpiData = [
-      {label:'Partite analizzate', val: total, color:'#1d4ed8', icon:'📊'},
-      {label:'Over 2.5 %', val: avgO25 != null ? avgO25+'%' : 'N/D', color:'#7c3aed', icon:'⚽'},
-      {label:'BTTS %', val: avgBtts != null ? avgBtts+'%' : 'N/D', color:'#0891b2', icon:'🎯'},
-      {label:'Gol <16' %', val: avgEg != null ? avgEg+'%' : 'N/D', color:'#16a34a', icon:'⚡'}
-    ];
-    kpisEl.innerHTML = kpiData.map(k =>
-      '<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">' +
-      '<div style="font-size:20px">' + k.icon + '</div>' +
-      '<div style="font-size:22px;font-weight:700;color:' + k.color + ';margin:4px 0">' + k.val + '</div>' +
-      '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px">' + k.label + '</div>' +
-      '</div>'
-    ).join('');
-
-    meta.textContent = (league || 'Tutti i campionati') + ' — ' + seasons.length + ' stagioni — ' + total + ' partite analizzate';
-
-    // Chart datasets
-    const ctx = document.getElementById('tr-chart').getContext('2d');
-    if (_trChart) { _trChart.destroy(); _trChart = null; }
-
-    const data = chartType === 'rolling' ? rolling : seasons;
-    const labels = chartType === 'rolling'
-      ? data.map(r => r.date || 'N/D')
-      : data.map(s => s.season);
-
-    _trChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Over 2.5 %', data: data.map(r => r.over_2_5),
-            borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,0.1)', tension:0.35, pointRadius:4, fill:true },
-          { label: 'BTTS %', data: data.map(r => r.btts),
-            borderColor:'#0891b2', backgroundColor:'rgba(8,145,178,0.08)', tension:0.35, pointRadius:4, fill:false },
-          { label: 'Gol < 16' %', data: data.map(r => r.early_goal),
-            borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.08)', tension:0.35, pointRadius:4, fill:false }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false },
-        plugins:{ legend:{ position:'top' },
-          tooltip:{ callbacks:{ label: c => c.dataset.label+': '+(c.parsed.y!=null?c.parsed.y+'%':'N/D') } } },
-        scales:{
-          y:{ min:0, max:100, title:{ display:true, text:'% partite' }, grid:{ color:'rgba(0,0,0,0.06)' } },
-          x:{ ticks:{ maxRotation:45 } }
-        }
+      // KPI totals
+      var totN = 0, sumO25 = 0, sumBtts = 0, sumEg = 0, cntO25 = 0, cntBtts = 0, cntEg = 0;
+      for (var i = 0; i < seasons.length; i++) {
+        var s = seasons[i];
+        totN += s.n;
+        if (s.over_2_5 != null) { sumO25 += s.over_2_5 * s.n; cntO25 += s.n; }
+        if (s.btts != null) { sumBtts += s.btts * s.n; cntBtts += s.n; }
+        if (s.early_goal != null) { sumEg += s.early_goal * s.n; cntEg += s.n; }
       }
-    });
+      var avgO25 = cntO25 > 0 ? Math.round(sumO25 / cntO25 * 10) / 10 : null;
+      var avgBtts = cntBtts > 0 ? Math.round(sumBtts / cntBtts * 10) / 10 : null;
+      var avgEg = cntEg > 0 ? Math.round(sumEg / cntEg * 10) / 10 : null;
 
-    // Table
-    let tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
-      '<thead><tr style="background:#1d4ed8;color:#fff;font-weight:600">' +
-      ['Stagione','Partite','Over 2.5','BTTS','Gol <16''].map(h =>
-        '<th style="padding:8px 12px;text-align:'+(h==='Stagione'||h==='Partite'?'left':'right')+';white-space:nowrap">'+h+'</th>'
-      ).join('') + '</tr></thead><tbody>';
+      if (kpisEl) {
+        var kd = [
+          {label:'Partite analizzate', val: total, color:'#1d4ed8', icon:'SS'},
+          {label:'Over 2.5', val: avgO25 != null ? avgO25 + '%' : 'N/D', color:'#7c3aed', icon:'GG'},
+          {label:'BTTS', val: avgBtts != null ? avgBtts + '%' : 'N/D', color:'#0891b2', icon:'TT'},
+          {label:'Gol entro 16min', val: avgEg != null ? avgEg + '%' : 'N/D', color:'#16a34a', icon:'EE'}
+        ];
+        kpisEl.innerHTML = kd.map(function(k) {
+          return '<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;text-align:center">' +
+            '<div style="font-size:22px;font-weight:700;color:' + k.color + ';margin:4px 0">' + k.val + '</div>' +
+            '<div style="font-size:11px;color:#6b7280;text-transform:uppercase">' + k.label + '</div>' +
+            '</div>';
+        }).join('');
+      }
 
-    seasons.forEach((s,i) => {
-      const bg = i%2===0 ? '' : 'background:#f8fafc';
-      const pct = v => v != null ? '<span style="color:'+(v>=60?'#16a34a':v>=45?'#d97706':'#dc2626')+'">'+v+'%</span>' : '<span style="color:#9ca3af">N/D</span>';
-      tbl += '<tr style="'+bg+'">'+
-        '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">'+s.season+'</td>'+
-        '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">'+s.n+'</td>'+
-        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.over_2_5)+'</td>'+
-        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.btts)+'</td>'+
-        '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">'+pct(s.early_goal)+'</td>'+
-        '</tr>';
-    });
-    tbl += '</tbody></table>';
-    tableEl.innerHTML = tbl;
+      if (meta) meta.textContent = (league || 'Tutti') + ' - ' + seasons.length + ' stagioni - ' + total + ' partite';
 
-  } catch(e) { meta.textContent = 'Errore: ' + e.message; }
+      var ctx = document.getElementById('tr-chart');
+      if (!ctx) return;
+      if (_trChart) { _trChart.destroy(); _trChart = null; }
+      var data = chartType === 'rolling' ? rolling : seasons;
+      var labels = data.map(function(r) { return r.date || r.season || ''; });
+      _trChart = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: 'Over 2.5', data: data.map(function(r){return r.over_2_5;}),
+              borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,0.1)', tension:0.35, pointRadius:4, fill:true },
+            { label: 'BTTS', data: data.map(function(r){return r.btts;}),
+              borderColor:'#0891b2', backgroundColor:'rgba(8,145,178,0.08)', tension:0.35, pointRadius:4 },
+            { label: 'Gol <16min', data: data.map(function(r){return r.early_goal;}),
+              borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.08)', tension:0.35, pointRadius:4 }
+          ]
+        },
+        options: {
+          responsive:true, maintainAspectRatio:false,
+          interaction:{mode:'index',intersect:false},
+          plugins:{legend:{position:'top'}},
+          scales:{
+            y:{min:0,max:100,title:{display:true,text:'% partite'},grid:{color:'rgba(0,0,0,0.06)'}},
+            x:{ticks:{maxRotation:45}}
+          }
+        }
+      });
+
+      if (tableEl && seasons.length > 0) {
+        var tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead>' +
+          '<tr style="background:#1d4ed8;color:#fff;font-weight:600">' +
+          '<th style="padding:8px 12px;text-align:left">Stagione</th>' +
+          '<th style="padding:8px 12px;text-align:right">Partite</th>' +
+          '<th style="padding:8px 12px;text-align:right">Over 2.5</th>' +
+          '<th style="padding:8px 12px;text-align:right">BTTS</th>' +
+          '<th style="padding:8px 12px;text-align:right">Gol &lt;16min</th>' +
+          '</tr></thead><tbody>';
+        for (var i = 0; i < seasons.length; i++) {
+          var s = seasons[i];
+          var bg = i % 2 === 0 ? '' : 'background:#f8fafc';
+          var pct = function(v) {
+            if (v == null) return '<span style="color:#9ca3af">N/D</span>';
+            var c = v >= 60 ? '#16a34a' : v >= 45 ? '#d97706' : '#dc2626';
+            return '<span style="color:' + c + '">' + v + '%</span>';
+          };
+          tbl += '<tr style="' + bg + '">' +
+            '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">' + s.season + '</td>' +
+            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n + '</td>' +
+            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.over_2_5) + '</td>' +
+            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.btts) + '</td>' +
+            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.early_goal) + '</td>' +
+            '</tr>';
+        }
+        tbl += '</tbody></table>';
+        tableEl.innerHTML = tbl;
+      }
+    })
+    .catch(function(e) { if (meta) meta.textContent = 'Errore: ' + e.message; });
 }
+
 </script>
 </body>
