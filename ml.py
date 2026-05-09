@@ -407,11 +407,16 @@ def register(app, query_fn):
         try:
             import predictions_settlement as pset
             if league_name:
+                # ML usa "Country - League", predictions_log salva solo "League" (API-Football)
+                _lnames = [league_name]
+                if ' - ' in league_name:
+                    _lnames.append(league_name.split(' - ', 1)[1])
+                _ph = ','.join('?' for _ in _lnames)
                 rows = pset._turso_select_rows(
                     "SELECT season, date_utc, ft_home, ft_away, ht_home, ht_away, first_goal_minute "
-                    "FROM predictions_log WHERE league_name=? AND ft_home IS NOT NULL AND ft_away IS NOT NULL "
-                    "ORDER BY date_utc",
-                    [league_name]
+                    "FROM predictions_log WHERE league_name IN (%s) AND ft_home IS NOT NULL AND ft_away IS NOT NULL "
+                    "ORDER BY date_utc" % _ph,
+                    _lnames
                 )
             else:
                 rows = pset._turso_select_rows(
