@@ -23,6 +23,8 @@ _ODDS_CACHE = {}         # {fixture_id: (ts, data)}
 _ODDS_TTL = 30           # secondi - quote live si muovono veloci
 _LIVE_FIX_CACHE = {'ts': 0, 'data': None}
 _LIVE_FIX_TTL = 45       # secondi
+_EVENTS_CACHE = {}  # {fixture_id: (ts, first_goal_minute_or_None)}
+_EVENTS_TTL = 120  # secondi - gli eventi goal non cambiano retroattivamente
 
 # -------------------- API-Football helpers --------------------
 
@@ -61,6 +63,27 @@ def _get_live_fixtures_af():
     _LIVE_FIX_CACHE['ts'] = now
     _LIVE_FIX_CACHE['data'] = data
     return data
+
+
+def _get_first_goal_minute(fixture_id):
+    """Ritorna il minuto del primo gol via API events, None se nessun gol trovato."""
+    now = time.time()
+    c = _EVENTS_CACHE.get(fixture_id)
+    if c and now - c[0] < _EVENTS_TTL:
+        return c[1]
+    data = _apisports_get('/fixtures/events', {'fixture': fixture_id})
+    fgm = None
+    if isinstance(data, dict):
+        for ev in (data.get('response') or []):
+            ev_type = (ev.get('type') or '').lower()
+            ev_detail = (ev.get('detail') or '').lower()
+            elapsed = (ev.get('time') or {}).get('elapsed')
+            if ev_type == 'goal' and elapsed is not None:
+                if 'missed penalty' not in ev_detail and 'penalty missed' not in ev_detail:
+                    fgm = int(elapsed)
+                    break
+    _EVENTS_CACHE[fixture_id] = (now, fgm)
+    return fgm
 
 
 def _fixture_to_model_ctx(fixture_data):
@@ -658,6 +681,10 @@ def register_picks_ui(app, get_adv_data):
                 if m is None or m < 1 or m > 120: continue
                 fid = ctx.get('fixture_id'); lid = ctx.get('league_id')
                 sh = ctx.get('score_home', 0) or 0; sa = ctx.get('score_away', 0) or 0
+                # Filtro: primo gol entro il 16' (salta 0-0 e gol tardivi)
+                if sh + sa == 0: continue
+                fgm = _get_first_goal_minute(fid)
+                if fgm is None or fgm > 16: continue
                 try: odds = _get_live_odds(fid)
                 except Exception: odds = None
                 parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
@@ -681,7 +708,7 @@ def register_picks_ui(app, get_adv_data):
                     _pset.log_picks(fid, _lctx, picks[:6])
                 except Exception:
                     pass
-                results.append({'fixture_id': fid, 'league_id': lid, 'league_name': ctx.get('league_name'), 'country': ctx.get('country'), 'home': ctx.get('home_team_name'), 'away': ctx.get('away_team_name'), 'minute': m, 'score': '%d-%d' % (sh, sa), 'picks': picks[:6]})
+                results.append({'fixture_id': fid, 'league_id': lid, 'league_name': ctx.get('league_name'), 'country': ctx.get('country'), 'home': ctx.get('home'), 'away': ctx.get('away'), 'minute': m, 'score': '%d-%d' % (sh, sa), 'picks': picks[:6]})
             except Exception:
                 continue
         results.sort(key=lambda r: -(r['picks'][0]['edge_pct'] if r['picks'] else 0))
