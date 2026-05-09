@@ -171,6 +171,10 @@
 
   <!-- Table -->
   <div id="tr-table" style="overflow-x:auto"></div>
+
+  <div id="tr-picks-accuracy" style="margin-top:16px;background:#161b22;border-radius:8px;padding:12px;border:1px solid #30363d">
+    <p style="color:#8b949e;font-size:13px;margin:0">Caricamento accuratezza pick ML...</p>
+  </div>
 </section>
 
 <section class="view" id="view-how">
@@ -447,23 +451,29 @@ function kpiCard(label, value) {
 
 // ── Trend ML: monitoraggio predizioni per campionato ──
 var _trChart = null;
+var _trLeaguesLoaded = false;
 function loadTrend() {
   var trSel = document.getElementById('tr-league');
-  var aSel = document.getElementById('a-league');
-  if (trSel && trSel.options.length === 0 && aSel) {
-    for (var i = 0; i < aSel.options.length; i++) {
-      var opt = document.createElement('option');
-      opt.value = aSel.options[i].value;
-      opt.textContent = aSel.options[i].textContent;
-      trSel.appendChild(opt);
-    }
+  if (!_trLeaguesLoaded) {
+    _trLeaguesLoaded = true;
+    fetch('/api/ml-picks-leagues').then(function(r){return r.json();}).then(function(d){
+      trSel.innerHTML = '<option value="">— Tutti i campionati —</option>';
+      (d.leagues||[]).forEach(function(l){
+        var o = document.createElement('option');
+        o.value = l.name; o.text = l.name + ' (' + l.n + ')';
+        trSel.appendChild(o);
+      });
+      loadTrend();
+    }).catch(function(){loadTrend();});
+    return;
   }
-  var league = trSel ? trSel.value || '' : '';
+  loadPicksAccuracy();
+  var league = trSel.value;
   var chartType = document.getElementById('tr-chart-type') ? document.getElementById('tr-chart-type').value : 'season';
-  var meta = document.getElementById('tr-meta');
+  var metaEl = document.getElementById('tr-meta');
   var kpisEl = document.getElementById('tr-kpis');
   var tableEl = document.getElementById('tr-table');
-  if (meta) meta.textContent = 'Caricamento dati...';
+  if (metaEl) metaEl.textContent = 'Caricamento dati...';
   if (kpisEl) kpisEl.innerHTML = '';
   if (tableEl) tableEl.innerHTML = '';
 
@@ -564,6 +574,32 @@ function loadTrend() {
       }
     })
     .catch(function(e) { if (meta) meta.textContent = 'Errore: ' + e.message; });
+}
+
+function loadPicksAccuracy() {
+  fetch('/api/ml-picks-accuracy').then(function(r){return r.json();}).then(function(d){
+    var el = document.getElementById('tr-picks-accuracy');
+    if (!el) return;
+    if (d.error || !d.by_market || d.by_market.length === 0) {
+      el.innerHTML = '<p style="color:#8b949e;font-size:13px;margin:0">Nessun pick ML registrato ancora. I pick vengono salvati automaticamente ogni volta che il modello genera una predizione live.</p>';
+      return;
+    }
+    var h = '<h4 style="color:#f0883e;margin:0 0 8px">Accuratezza Pick ML (' + d.total_logged + ' pick, ' + d.pending + ' in attesa risultato)</h4>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>';
+    h += '<th style="background:#1d4ed8;color:#fff;padding:8px;text-align:left">Mercato</th>';
+    h += '<th style="background:#1d4ed8;color:#fff;padding:8px;text-align:center">Pick</th>';
+    h += '<th style="background:#1d4ed8;color:#fff;padding:8px;text-align:center">WIN</th>';
+    h += '<th style="background:#1d4ed8;color:#fff;padding:8px;text-align:center">% WIN</th>';
+    h += '</tr></thead><tbody>';
+    (d.by_market||[]).forEach(function(m,i){
+      var pct = m.total > 0 ? Math.round(m.wins/m.total*100) : 0;
+      var color = pct >= 55 ? '#3fb950' : pct >= 45 ? '#d29922' : '#f85149';
+      var bg = i%2===0 ? '#0d1117' : '#161b22';
+      h += '<tr style="background:'+bg+'"><td style="padding:8px">'+m.market+'</td><td style="padding:8px;text-align:center">'+m.total+'</td><td style="padding:8px;text-align:center">'+m.wins+'</td><td style="padding:8px;text-align:center;font-weight:600;color:'+color+'">'+pct+'%</td></tr>';
+    });
+    h += '</tbody></table>';
+    el.innerHTML = h;
+  }).catch(function(){}); 
 }
 
 </script>
