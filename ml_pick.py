@@ -685,6 +685,12 @@ def register_picks_ui(app, get_adv_data):
                 if sh + sa == 0: continue
                 fgm = _get_first_goal_minute(fid)
                 if fgm is None or fgm > 16: continue
+                # Filtra: solo campionati nel whitelist n8n
+                try:
+                    from odds_logger import LEAGUE_WHITELIST as _WL
+                    if lid not in _WL: continue
+                except Exception:
+                    pass
                 try: odds = _get_live_odds(fid)
                 except Exception: odds = None
                 parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
