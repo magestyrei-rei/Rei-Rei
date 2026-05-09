@@ -458,7 +458,21 @@ def register(app, query_fn):
         return jsonify({'league': league_name, 'total': len(rows),
                         'seasons': seasons_out, 'rolling': rolling[-50:]})
 
-    def _get_adv_data():
+    @app.route('/api/ml-picks-leagues')
+    def api_ml_picks_leagues():
+        """Campionati in predictions_log (nomi reali da API-Football)."""
+        try:
+            import predictions_settlement as pset
+            rows = pset._turso_select_rows(
+                "SELECT league_name, COUNT(*) as n FROM predictions_log "
+                "WHERE ft_home IS NOT NULL AND league_name IS NOT NULL "
+                "GROUP BY league_name ORDER BY n DESC"
+            )
+            return jsonify({'leagues': [{'name': r['league_name'], 'n': r['n']} for r in rows if r.get('league_name')]})
+        except Exception as e:
+            return jsonify({'error': str(e), 'leagues': []})
+
+        def _get_adv_data():
         """Provider usato da ml_pick: ritorna adv_data con la stessa cache di /api/ml-advanced."""
         now = time.time()
         if _ML_CACHE['adv_data'] is None or (now - _ML_CACHE['adv_ts']) > _ML_TTL:
