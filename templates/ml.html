@@ -480,7 +480,7 @@ function loadTrend() {
   fetch('/api/ml-picks-stats?league=' + encodeURIComponent(league))
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.error) { if (meta) meta.textContent = 'Errore: ' + d.error; return; }
+      if (d.error) { if (metaEl) metaEl.textContent = 'Errore: ' + d.error; return; }
       var seasons = d.seasons || [];
       var rolling = d.rolling || [];
       var total = d.total || 0;
@@ -513,7 +513,7 @@ function loadTrend() {
         }).join('');
       }
 
-      if (meta) meta.textContent = (league || 'Tutti') + ' - ' + seasons.length + ' stagioni - ' + total + ' partite';
+      if (metaEl) metaEl.textContent = (league || 'Tutti') + ' - ' + seasons.length + ' stagioni - ' + total + ' partite';
 
       var ctx = document.getElementById('tr-chart');
       if (!ctx) return;
@@ -573,7 +573,7 @@ function loadTrend() {
         tableEl.innerHTML = tbl;
       }
     })
-    .catch(function(e) { if (meta) meta.textContent = 'Errore: ' + e.message; });
+    .catch(function(e) { if (metaEl) metaEl.textContent = 'Errore: ' + e.message; });
 }
 
 function loadPicksAccuracy() {
