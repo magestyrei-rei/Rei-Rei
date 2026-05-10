@@ -317,7 +317,13 @@ def _parse_odds_payload(data):
 # -------------------- Model lookup helpers --------------------
 
 def _pick_snapshot(minute):
-    """Snapshot disponibili: 45, 60, 70, 80."""
+    """Snapshot disponibili: 16, 25, 35, 45, 60, 70, 80 (allineati a ml.py)."""
+    if minute <= 20:
+        return '16'
+    if minute <= 30:
+        return '25'
+    if minute <= 40:
+        return '35'
     if minute <= 52:
         return '45'
     if minute <= 65:
@@ -571,8 +577,16 @@ def register(app, adv_data_provider):
                 'available_leagues_sample': list((adv_data.get('leagues') or {}).keys())[:10],
             })
 
-        # 3) Model probs
+        # 3) Model probs (frequentista + blend Poisson bivariato)
         probs, source = _extract_probs(lg_data, ctx['minute'], ctx['score_home'], ctx['score_away'])
+        try:
+            import ml_poisson as _mpo2
+            _pw2 = float(os.getenv('POISSON_WEIGHT', '0.4'))
+            _pois2 = _mpo2.live_poisson_probs(ctx['minute'], ctx['score_home'], ctx['score_away'], ctx.get('league_id'))
+            probs = {k: (1 - _pw2) * v + _pw2 * _pois2.get(k, v) for k, v in probs.items()}
+            source += '+poisson_blend'
+        except Exception:
+            pass
 
         # 4) Live odds
         odds_data = _get_live_odds(fixture)
@@ -702,6 +716,14 @@ def register_picks_ui(app, get_adv_data):
                 if not lg_data: continue
                 probs, _ = _extract_probs(lg_data, m, sh, sa)
                 if not probs: continue
+                # Blend frequentista + Poisson bivariato (peso 40% Poisson, config via env)
+                try:
+                    import ml_poisson as _mpo
+                    _pw = float(os.getenv('POISSON_WEIGHT', '0.4'))
+                    _pois = _mpo.live_poisson_probs(m, sh, sa, lid)
+                    probs = {k: (1 - _pw) * v + _pw * _pois.get(k, v) for k, v in probs.items()}
+                except Exception:
+                    pass
                 # Escludi mercati già decisi dal punteggio corrente
                 # (il modello usa prob FT storica, ma la quota live si riferisce ai gol rimanenti)
                 _settled = set()
