@@ -483,7 +483,7 @@ def register(app, query_fn):
             for entry in rolling:
                 entry['ml_acc'] = None
         
-return jsonify({'league': league_name, 'total': len(rows),
+        return jsonify({'league': league_name, 'total': len(rows),
                         'seasons': seasons_out, 'rolling': rolling[-50:]})
 
     @app.route('/api/ml-picks-leagues')
