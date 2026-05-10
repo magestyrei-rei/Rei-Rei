@@ -182,7 +182,7 @@ def _build_eg_data(query_fn):
         JOIN leagues l ON l.id = m.league_id
         WHERE m.ft_home IS NOT NULL AND m.ft_away IS NOT NULL
           AND m.first_goal_team IN ('home', 'away')
-          AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+          AND m.first_goal_min IS NOT NULL AND m.first_goal_min <= 16
     """)
     per = []
     for r in rows:
@@ -279,7 +279,7 @@ def _build_adv_data(query_fn):
         FROM matches m
         JOIN leagues l ON l.id = m.league_id
         WHERE m.ft_home IS NOT NULL AND m.ft_away IS NOT NULL
-          AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+          AND m.first_goal_min IS NOT NULL AND m.first_goal_min <= 16
     """)
     per_match = []
     for r in rows:
@@ -489,7 +489,7 @@ def register(app, query_fn):
                 SELECT l.name AS name, COUNT(*) AS n
                 FROM matches m JOIN leagues l ON l.id = m.league_id
                 WHERE m.ft_home IS NOT NULL
-                  AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+                  AND m.first_goal_min IS NOT NULL AND m.first_goal_min <= 16
                 GROUP BY l.name ORDER BY l.name
             """)
             for r in (rows or []):
@@ -563,12 +563,12 @@ def register(app, query_fn):
                 sq = query_fn("""
                     SELECT l.name AS league,
                            m.ft_home, m.ft_away, m.ht_home, m.ht_away,
-                           m.first_goal_minute, m.first_goal_team,
+                           m.first_goal_min AS first_goal_minute, m.first_goal_team,
                            m.result, m.btts, m.season
                     FROM matches m JOIN leagues l ON l.id = m.league_id
                     WHERE l.name = ?
                       AND m.ft_home IS NOT NULL
-                      AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+                      AND m.first_goal_min IS NOT NULL AND m.first_goal_min <= 16
                     ORDER BY m.id DESC LIMIT ?
                 """, (league, limit - len(matches)))
                 for r in (sq or []):
