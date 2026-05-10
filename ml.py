@@ -1,5 +1,5 @@
 # ml.py - ML predictor: (1) early-goal legacy + (2) minute+score live-betting
-# Hierarchical Laplace smoothing with back-off (alpha=3)
+# Laplace smoothing con alpha ADATTIVO — FILTRO training: solo 1 gol <= 16'
 from flask import jsonify, send_from_directory, request
 from datetime import datetime
 import time
@@ -8,6 +8,8 @@ import ml_pick  # live betting picks: API-Football odds + Kelly
 import odds_logger  # live odds snapshot logger for historical dataset
 import ml_poisson  # Poisson bivariate live engine: correct score, HTS/ATS, mercati gol
 import predictions_settlement  # Settlement pipeline: popola predictions_log con risultati FT
+
+EARLY_GOAL_MAX_MIN = 16  # filtro training=deploy: 1 gol nei primi N min
 
 _ML_CACHE = {'eg_data': None, 'eg_ts': 0, 'adv_data': None, 'adv_ts': 0}
 _ML_TTL = 600  # 10 minuti
@@ -27,8 +29,8 @@ _MK_2H = ['2h_1', '2h_X', '2h_2',
 
 _MK_ALL = _MK_FT + _MK_2H
 
-# Minuti snapshot per advanced predictor
-_SNAP_MINUTES = [45, 60, 70, 80]
+# Snapshot minuti - granularita' fine pre-45' per gol early
+_SNAP_MINUTES = [16, 25, 35, 45, 60, 70, 80]
 
 # Regex per parsare goals_html
 # Match: <span class="away-goal">MIN'</span>  OPPURE  MIN'
@@ -141,7 +143,13 @@ def _aggr(ms, keys):
     return out
 
 
-def _shrink(child_n, child_p, parent_p, keys, alpha=3.0):
+def _adaptive_alpha(n, base=3.0, scale=60.0, min_alpha=0.5):
+    """Alpha adattivo: piu' campioni = meno regressione. n=0->3.0, n=60->1.5, n->inf->0.5"""
+    return max(min_alpha, base * scale / (n + scale))
+
+def _shrink(child_n, child_p, parent_p, keys, alpha=None):
+    if alpha is None:
+        alpha = _adaptive_alpha(child_n)
     if child_n == 0:
         return {k: parent_p.get(k, 0.0) for k in keys}
     return {k: (child_p.get(k, 0.0) * child_n + alpha * parent_p.get(k, 0.0)) / (child_n + alpha) for k in keys}
@@ -174,6 +182,7 @@ def _build_eg_data(query_fn):
         JOIN leagues l ON l.id = m.league_id
         WHERE m.ft_home IS NOT NULL AND m.ft_away IS NOT NULL
           AND m.first_goal_team IN ('home', 'away')
+          AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
     """)
     per = []
     for r in rows:
@@ -236,8 +245,10 @@ def _build_eg_data(query_fn):
                     ht_p['over_3_5'] = 1.0
                     ht_p['under_3_5'] = 0.0
                 by_pg_ht[pg_key][s] = ht_p
+        _alpha_lg = _adaptive_alpha(len(rows_lg))
         leagues_out[lg] = {
             'n': len(rows_lg),
+            'confidence': round((1.0 - _alpha_lg / (len(rows_lg) + _alpha_lg)) * 100, 1),
             'overall': overall,
             'by_primo_gol': by_pg,
             'by_primo_gol_ht': by_pg_ht,
@@ -268,6 +279,7 @@ def _build_adv_data(query_fn):
         FROM matches m
         JOIN leagues l ON l.id = m.league_id
         WHERE m.ft_home IS NOT NULL AND m.ft_away IS NOT NULL
+          AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
     """)
     per_match = []
     for r in rows:
@@ -324,8 +336,10 @@ def _build_adv_data(query_fn):
                 bucket_out[score_key] = p
             by_minute[str(M)] = bucket_out
 
+        _alpha_lg2 = _adaptive_alpha(len(matches))
         leagues_out[lg] = {
             'n': len(matches),
+            'confidence': round((1.0 - _alpha_lg2 / (len(matches) + _alpha_lg2)) * 100, 1),
             'overall': overall,
             'by_minute': by_minute,
         }
