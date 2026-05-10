@@ -528,8 +528,9 @@ def register(app, query_fn):
             _ph = ','.join('?' for _ in lnames)
             pl_rows = _pset._turso_select_rows(
                 "SELECT league_name, home_team_name, away_team_name, "
+                "home_team_id, away_team_id, "
                 "ft_home, ft_away, ht_home, ht_away, "
-                "first_goal_minute, first_goal_team, date_utc, season "
+                "first_goal_minute, first_goal_team_id, date_utc, season "
                 "FROM predictions_log "
                 "WHERE league_name IN (%s) "
                 "AND ft_home IS NOT NULL "
@@ -540,12 +541,16 @@ def register(app, query_fn):
             for r in pl_rows:
                 fh = r.get('ft_home'); fa = r.get('ft_away')
                 res = ('1' if int(fh or 0) > int(fa or 0) else ('2' if int(fa or 0) > int(fh or 0) else 'X')) if fh is not None else '?'
+                _ftid = r.get('first_goal_team_id')
+                _htid = r.get('home_team_id')
+                _atid = r.get('away_team_id')
+                _fgt = 'home' if (_ftid and _htid and int(_ftid)==int(_htid)) else ('away' if (_ftid and _atid and int(_ftid)==int(_atid)) else '')
                 matches.append({
                     'home': r.get('home_team_name') or '', 'away': r.get('away_team_name') or '',
                     'ft_home': fh, 'ft_away': fa,
                     'ht_home': r.get('ht_home'), 'ht_away': r.get('ht_away'),
                     'first_goal_minute': r.get('first_goal_minute'),
-                    'first_goal_team': r.get('first_goal_team') or '',
+                    'first_goal_team': _fgt,
                     'date_utc': (r.get('date_utc') or '')[:10],
                     'season': r.get('season'), 'result': res, 'source': 'live',
                 })
