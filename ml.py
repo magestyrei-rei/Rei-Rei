@@ -364,6 +364,114 @@ def _build_adv_data(query_fn):
 def register(app, query_fn):
     """Registra le route ML sull'app Flask."""
 
+
+    @app.route('/early-goals')
+    def early_goals_page():
+        from flask import Response as _R
+        return _R(_EARLY_GOALS_HTML, mimetype='text/html')
+
+    @app.route('/api/eg-leagues')
+    def api_eg_leagues():
+        """Campionati con partite early-goal (primo gol <=16') — da SQLite + Turso."""
+        leagues = {}
+        try:
+            rows = query_fn("""
+                SELECT l.name AS name, COUNT(*) AS n
+                FROM matches m JOIN leagues l ON l.id = m.league_id
+                WHERE m.ft_home IS NOT NULL
+                  AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+                GROUP BY l.name ORDER BY l.name
+            """)
+            for r in (rows or []):
+                leagues[r['name']] = leagues.get(r['name'], 0) + int(r['n'] or 0)
+        except Exception:
+            pass
+        try:
+            import predictions_settlement as _pset
+            pl = _pset._turso_select_rows(
+                "SELECT DISTINCT league_name FROM predictions_log "
+                "WHERE ft_home IS NOT NULL AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
+                "ORDER BY league_name"
+            ) or []
+            for r in pl:
+                n = (r.get('league_name') or '').strip()
+                if n and n not in leagues:
+                    leagues[n] = 0
+        except Exception:
+            pass
+        out = sorted([{'name': k, 'n': v} for k, v in leagues.items()], key=lambda x: x['name'])
+        return jsonify({'leagues': out})
+
+    @app.route('/api/last-eg-matches')
+    def api_last_eg_matches():
+        """Ultime N partite con 1° gol <=16' per campionato. Combina Turso + SQLite."""
+        league = request.args.get('league', '').strip()
+        limit = min(int(request.args.get('limit', 30) or 30), 100)
+        matches = []
+
+        # 1) predictions_log (Turso) — ha team names, date, first_goal_team
+        try:
+            import predictions_settlement as _pset
+            lnames = [league]
+            if ' - ' in league:
+                lnames.append(league.split(' - ', 1)[1])
+            _ph = ','.join('?' for _ in lnames)
+            pl_rows = _pset._turso_select_rows(
+                "SELECT league_name, home_team_name, away_team_name, "
+                "ft_home, ft_away, ht_home, ht_away, "
+                "first_goal_minute, first_goal_team, date_utc, season "
+                "FROM predictions_log "
+                "WHERE league_name IN (%s) "
+                "AND ft_home IS NOT NULL "
+                "AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
+                "ORDER BY settled_ts DESC LIMIT ?" % _ph,
+                lnames + [limit]
+            ) or []
+            for r in pl_rows:
+                fh = r.get('ft_home'); fa = r.get('ft_away')
+                res = ('1' if int(fh or 0) > int(fa or 0) else ('2' if int(fa or 0) > int(fh or 0) else 'X')) if fh is not None else '?'
+                matches.append({
+                    'home': r.get('home_team_name') or '', 'away': r.get('away_team_name') or '',
+                    'ft_home': fh, 'ft_away': fa,
+                    'ht_home': r.get('ht_home'), 'ht_away': r.get('ht_away'),
+                    'first_goal_minute': r.get('first_goal_minute'),
+                    'first_goal_team': r.get('first_goal_team') or '',
+                    'date_utc': (r.get('date_utc') or '')[:10],
+                    'season': r.get('season'), 'result': res, 'source': 'live',
+                })
+        except Exception:
+            pass
+
+        # 2) SQLite storico (se servono altre partite)
+        if len(matches) < limit:
+            try:
+                sq = query_fn("""
+                    SELECT l.name AS league,
+                           m.ft_home, m.ft_away, m.ht_home, m.ht_away,
+                           m.first_goal_minute, m.first_goal_team,
+                           m.result, m.btts, m.season
+                    FROM matches m JOIN leagues l ON l.id = m.league_id
+                    WHERE l.name = ?
+                      AND m.ft_home IS NOT NULL
+                      AND m.first_goal_minute IS NOT NULL AND m.first_goal_minute <= 16
+                    ORDER BY m.id DESC LIMIT ?
+                """, (league, limit - len(matches)))
+                for r in (sq or []):
+                    fh = r.get('ft_home'); fa = r.get('ft_away')
+                    res = r.get('result') or ('1' if int(fh or 0) > int(fa or 0) else ('2' if int(fa or 0) > int(fh or 0) else 'X'))
+                    matches.append({
+                        'home': '', 'away': '',
+                        'ft_home': fh, 'ft_away': fa,
+                        'ht_home': r.get('ht_home'), 'ht_away': r.get('ht_away'),
+                        'first_goal_minute': r.get('first_goal_minute'),
+                        'first_goal_team': r.get('first_goal_team') or '',
+                        'date_utc': '', 'season': r.get('season'), 'result': res, 'source': 'history',
+                    })
+            except Exception:
+                pass
+
+        return jsonify({'league': league, 'count': len(matches), 'matches': matches[:limit]})
+
     @app.route('/ml')
     def ml_page():
         resp = send_from_directory('templates', 'ml.html')
