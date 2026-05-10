@@ -718,7 +718,8 @@ def register_picks_ui(app, get_adv_data):
                 # ML hints: probabilità modello su TUTTI i mercati (informativo, no edge)
                 _all_labels = {'1':'1 (CASA)','X':'X (PAREGGIO)','2':'2 (OSPITE)','over_1_5':'OVER 1.5','over_2_5':'OVER 2.5','over_3_5':'OVER 3.5','under_1_5':'UNDER 1.5','under_2_5':'UNDER 2.5','under_3_5':'UNDER 3.5','btts_si':'BTTS SI','btts_no':'BTTS NO'}
                 _all_probs = _extract_probs(lg_data, m, sh, sa)[0]  # probs complete (no filtro _settled)
-                ml_hints = sorted([{'market':k,'label':_all_labels.get(k,k),'prob':round(v*100,1)} for k,v in _all_probs.items() if k in _all_labels and v >= 0.50], key=lambda x:-x['prob'])[:6]
+                _over_mkts = {'over_1_5','over_2_5','over_3_5','under_1_5','under_2_5','under_3_5'}
+                ml_hints = sorted([{'market':k,'label':_all_labels.get(k,k),'prob':round(v*100,1)} for k,v in _all_probs.items() if k in _all_labels and k not in _settled and (v >= 0.40 if k in _over_mkts else v >= 0.50)], key=lambda x:-x['prob'])[:6]
                 _label_map = dict(_PICKS_MARKET_LABELS)
                 picks = [{'market': rp['market'], 'market_label': _label_map.get(rp['market'], rp['market']), 'prob': rp['model_prob'], 'fair_quota': round(1.0/rp['model_prob'], 3) if rp['model_prob'] > 0 else 0, 'bookie': rp['bookie'], 'bookie_quota': rp['quota'], 'edge_pct': rp['edge_pct'], 'stake_pct': round(rp['stake_pct']*100.0, 2), 'stake_eur': rp['stake_eur']} for rp in raw_picks]
                 if not picks: continue
