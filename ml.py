@@ -359,6 +359,116 @@ def _build_adv_data(query_fn):
     }
 
 
+_EARLY_GOALS_HTML = """<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Early Goal History - Rei-Rei</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px}
+h1{color:#58a6ff;margin:0 0 16px;font-size:22px}
+.nav{margin-bottom:16px;font-size:13px}
+.nav a{color:#58a6ff;text-decoration:none}
+.controls{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+select{background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 12px;font-size:14px}
+.stats-row{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.stat-box{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 16px;text-align:center;min-width:90px}
+.stat-val{font-size:20px;font-weight:700;color:#3fb950}
+.stat-lbl{font-size:11px;color:#8b949e;margin-top:2px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#161b22;color:#8b949e;padding:8px 10px;text-align:left;border-bottom:1px solid #30363d;cursor:pointer;user-select:none;white-space:nowrap}
+th:hover{color:#c9d1d9}
+td{padding:7px 10px;border-bottom:1px solid #21262d}
+tr:hover td{background:#161b22}
+.badge-home{background:#1f6feb33;color:#58a6ff;border:1px solid #1f6feb;border-radius:12px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.badge-away{background:#9e6a0333;color:#d29922;border:1px solid #9e6a03;border-radius:12px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.res-1{color:#3fb950;font-weight:700}.res-x{color:#8b949e;font-weight:700}.res-2{color:#f85149;font-weight:700}
+.btts-si{color:#3fb950}.btts-no{color:#8b949e}
+.refresh-info{font-size:11px;color:#8b949e;margin-left:auto}
+.empty{color:#8b949e;padding:32px;text-align:center}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style></head>
+<body>
+<div class="nav"><a href="/picks">&larr; Live Picks</a> &middot; <a href="/ml">ML Stats</a></div>
+<h1>&#x23F0; Early Goal History</h1>
+<div class="controls">
+  <select id="lgSel"><option value="">-- Seleziona campionato --</option></select>
+  <span class="refresh-info" id="rInfo">Auto-refresh 90s</span>
+</div>
+<div class="stats-row" id="sRow"></div>
+<div id="tWrap"><div class="empty">Seleziona un campionato per vedere le ultime 30 partite con primo gol nei primi 16 minuti</div></div>
+<script>
+var _sc='date_utc',_sd=-1,_data=[],_timer=null,_cd=90;
+async function loadLeagues(){
+  var s=document.getElementById('lgSel');
+  try{var r=await fetch('/api/eg-leagues'),d=await r.json();
+    (d.leagues||[]).forEach(function(l){var o=new Option(l.name+(l.n?' ('+l.n+')':''),l.name);s.add(o);});
+  }catch(e){}
+}
+async function loadMatches(lg){
+  if(!lg)return;
+  document.getElementById('tWrap').innerHTML='<div class="empty"><span class="spinner"></span>Caricamento...</div>';
+  document.getElementById('sRow').innerHTML='';
+  try{
+    var r=await fetch('/api/last-eg-matches?league='+encodeURIComponent(lg)+'&limit=30');
+    var d=await r.json();_data=d.matches||[];renderStats();renderTable();
+  }catch(e){document.getElementById('tWrap').innerHTML='<div class="empty">Errore dati</div>';}
+}
+function renderStats(){
+  var ms=_data,n=ms.length;if(!n){document.getElementById('sRow').innerHTML='';return;}
+  var h1=0,hX=0,h2=0,ov=0,bt=0,tot=0;
+  ms.forEach(function(m){
+    if(m.result==='1')h1++;else if(m.result==='X')hX++;else h2++;
+    var g=parseInt(m.ft_home||0)+parseInt(m.ft_away||0);
+    if(g>2)ov++;if(parseInt(m.ft_home||0)>0&&parseInt(m.ft_away||0)>0)bt++;
+    tot+=parseInt(m.first_goal_minute||0);
+  });
+  function p(v){return Math.round(v/n*100)+'%';}
+  var avgm=n>0?(tot/n).toFixed(1):'-';
+  var boxes=[['1/X/2',p(h1)+'/'+p(hX)+'/'+p(h2)],['Over 2.5',p(ov)],['BTTS',p(bt)],['Avg gol',avgm+"'"],['N',n]];
+  document.getElementById('sRow').innerHTML=boxes.map(function(b){
+    return '<div class="stat-box"><div class="stat-val">'+b[1]+'</div><div class="stat-lbl">'+b[0]+'</div></div>';
+  }).join('');
+}
+function renderTable(){
+  var ms=_data.slice().sort(function(a,b){
+    var va=a[_sc],vb=b[_sc];
+    if(_sc==='first_goal_minute'){va=parseInt(va||99);vb=parseInt(vb||99);}
+    else if(_sc==='total'){va=parseInt(a.ft_home||0)+parseInt(a.ft_away||0);vb=parseInt(b.ft_home||0)+parseInt(b.ft_away||0);}
+    return va<vb?-_sd:va>vb?_sd:0;
+  });
+  if(!ms.length){document.getElementById('tWrap').innerHTML='<div class="empty">Nessuna partita trovata</div>';return;}
+  function th(col,lbl){return '<th data-col="'+col+'">'+lbl+(_sc===col?(_sd>0?' &#x25B2;':' &#x25BC;'):'')+'</th>';}
+  var h='<table id="egTbl"><thead><tr>'+th('date_utc','Data')+th('home','Casa')+'<th>FT</th><th>HT</th>'+th('away','Ospite')+th('first_goal_minute','1gol')+th('total','Tot')+'<th>BTTS</th>'+th('result','Ris.')+'</tr></thead><tbody>';
+  ms.forEach(function(m){
+    var ft=m.ft_home!=null?m.ft_home+'-'+m.ft_away:'-';
+    var ht=m.ht_home!=null?m.ht_home+'-'+m.ht_away:'-';
+    var tot=m.ft_home!=null?parseInt(m.ft_home||0)+parseInt(m.ft_away||0):'-';
+    var bt=m.ft_home!=null?(parseInt(m.ft_home)>0&&parseInt(m.ft_away)>0?'<span class="btts-si">SI</span>':'<span class="btts-no">NO</span>'):'-';
+    var rc=m.result==='1'?'res-1':m.result==='X'?'res-x':'res-2';
+    var fg=m.first_goal_team==='home'?'<span class="badge-home">Casa '+(m.first_goal_minute||'?')+"'</span>":m.first_goal_team==='away'?'<span class="badge-away">Osp '+(m.first_goal_minute||'?')+"'</span>":(m.first_goal_minute||'?')+"'";
+    h+='<tr><td>'+(m.date_utc||'-')+'</td><td>'+(m.home||'N/D')+'</td><td><b>'+ft+'</b></td><td style="color:#8b949e">'+ht+'</td><td>'+(m.away||'N/D')+'</td><td>'+fg+'</td><td>'+tot+'</td><td>'+bt+'</td><td class="'+rc+'">'+(m.result||'-')+'</td></tr>';
+  });
+  document.getElementById('tWrap').innerHTML=h+'</tbody></table>';
+  document.getElementById('egTbl').addEventListener('click',function(e){
+    var th=e.target.closest('th[data-col]');
+    if(th){if(_sc===th.dataset.col)_sd*=-1;else{_sc=th.dataset.col;_sd=-1;}renderTable();}
+  });
+}
+function startTimer(){
+  if(_timer)clearInterval(_timer);_cd=90;
+  _timer=setInterval(function(){
+    _cd--;document.getElementById('rInfo').textContent='Auto-refresh '+_cd+'s';
+    if(_cd<=0){var lg=document.getElementById('lgSel').value;if(lg)loadMatches(lg);_cd=90;}
+  },1000);
+}
+document.getElementById('lgSel').addEventListener('change',function(){if(this.value){loadMatches(this.value);startTimer();}});
+loadLeagues();startTimer();
+</script>
+</body>
+</html>"""
+
 # âââââââââââââââââââ Registrazione route âââââââââââââââââââ
 
 def register(app, query_fn):
