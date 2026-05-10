@@ -65,6 +65,8 @@ def get_calibration_status():
         'min_samples': CALIB_MIN_SAMPLES,
         'leagues_loaded': len(_LEAGUE_LAMBDA),
         'teams_loaded': len(_TEAM_ATT),
+        'score_state_def_factor': SCORE_STATE_DEF_FACTOR,
+        'score_state_att_factor': SCORE_STATE_ATT_FACTOR,
     }
 
 
@@ -82,17 +84,20 @@ def _residual_lambdas(minute, score_h, score_a, league_id=None, team_h_id=None, 
     home_share = _LEAGUE_HOME_SHARE.get(league_id, DEFAULT_HOME_SHARE)
 
     minutes_left = max(1, 90 - int(minute or 0))
-    base_h = league_avg * home_share * (minutes_left / 90.0)
-    base_a = league_avg * (1.0 - home_share) * (minutes_left / 90.0)
+    # Urgency boost: nei minuti finali chi e' sotto pressa ancora di piu'
+    urgency = 1.0 + max(0.0, (60 - minutes_left) / 200.0)  # +0-15% dopo il 30' rimanente
+    base_h = league_avg * home_share * (minutes_left / 90.0) * urgency
+    base_a = league_avg * (1.0 - home_share) * (minutes_left / 90.0) * urgency
 
-    # Score-state adjustment: chi e' in vantaggio difende di piu'
+    # Score-state: chi e' avanti difende (-), chi e' sotto attacca (+)
+    # Nelle partite con gol early il trailing team e' molto piu' aggressivo
     diff = score_h - score_a
     if diff > 0:
-        base_h *= SCORE_STATE_DEF_FACTOR
-        base_a *= (2.0 - SCORE_STATE_DEF_FACTOR)
+        base_h *= SCORE_STATE_DEF_FACTOR        # casa avanti: difende
+        base_a *= SCORE_STATE_ATT_FACTOR        # ospite sotto: pressa
     elif diff < 0:
-        base_a *= SCORE_STATE_DEF_FACTOR
-        base_h *= (2.0 - SCORE_STATE_DEF_FACTOR)
+        base_a *= SCORE_STATE_DEF_FACTOR        # ospite avanti: difende
+        base_h *= SCORE_STATE_ATT_FACTOR        # casa sotto: pressa
 
     # Team strength multiplicativo (se calibrato)
     if team_h_id in _TEAM_ATT and team_a_id in _TEAM_DEF:
@@ -341,6 +346,26 @@ def calibrate_from_turso():
         if league_per_team > 0:
             new_team_att[int(tid)] = max(0.5, min(2.0, float(s) / league_per_team))
             new_team_def[int(tid)] = max(0.5, min(2.0, float(c) / league_per_team))
+
+    # Stima empirica del SCORE_STATE_DEF_FACTOR dai dati filtrati
+    # Se la squadra in vantaggio segna meno della media, stima il fattore
+    try:
+        factor_rows = _turso_query(
+            "SELECT AVG(CASE WHEN ft_home > ft_away THEN ft_home ELSE ft_away END * 1.0 / "
+            "NULLIF(ft_home + ft_away, 0)) AS leader_share "
+            "FROM predictions_log WHERE ft_home IS NOT NULL AND ft_home != ft_away "
+            "AND first_goal_minute IS NOT NULL AND first_goal_minute <= ?",
+            [CALIB_FIRST_GOAL_MAX_MIN]
+        )
+        ls = (factor_rows or [{}])[0].get('leader_share')
+        if ls and 0.4 < float(ls) < 0.85:
+            import os as _os
+            global SCORE_STATE_DEF_FACTOR
+            # leader_share > 0.5 significa che chi e' avanti segna di meno relativamente
+            SCORE_STATE_DEF_FACTOR = round(max(0.70, min(0.92, 2.0 * (1.0 - float(ls)))), 3)
+            _CALIB_STATE['score_state_def_factor'] = SCORE_STATE_DEF_FACTOR
+    except Exception:
+        pass
 
     _LEAGUE_LAMBDA = new_league_lambda
     _LEAGUE_HOME_SHARE = new_league_hshare
