@@ -529,7 +529,7 @@ function loadTrend() {
               borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,0.1)', tension:0.35, pointRadius:4, fill:true },
             { label: 'BTTS', data: data.map(function(r){return r.btts;}),
               borderColor:'#0891b2', backgroundColor:'rgba(8,145,178,0.08)', tension:0.35, pointRadius:4 },
-            { label: 'Gol <16min', data: data.map(function(r){return r.early_goal;}),
+            { label: 'Win% ML', data: data.map(function(r){return r.ml_acc != null ? r.ml_acc : null;}),
               borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.08)', tension:0.35, pointRadius:4 }
           ]
         },
@@ -555,7 +555,7 @@ function loadTrend() {
           '</tr></thead><tbody>';
         for (var i = 0; i < seasons.length; i++) {
           var s = seasons[i];
-          var bg = i % 2 === 0 ? '' : 'background:#f8fafc';
+          var bg = i % 2 === 0 ? '' : 'background:#0f172a;color:#e2e8f0';
           var pct = function(v) {
             if (v == null) return '<span style="color:#9ca3af">N/D</span>';
             var c = v >= 60 ? '#16a34a' : v >= 45 ? '#d97706' : '#dc2626';
