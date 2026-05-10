@@ -66,11 +66,23 @@ def _get_live_fixtures_af():
 
 
 def _get_first_goal_minute(fixture_id):
-    """Ritorna il minuto del primo gol via API events, None se nessun gol trovato."""
+    """Ritorna il minuto del primo gol.
+    Priorita': 1) app.live_tracking (gia' popolato dal polling, 0 API calls extra)
+               2) _EVENTS_CACHE locale  3) API events come fallback."""
+    # 1) Live tracking di app.py: il polling aggiorna ogni minuto senza costi API
+    try:
+        import app as _app_mod
+        tracked = _app_mod.live_tracking.get(fixture_id)
+        if tracked is not None:
+            return tracked.get('first_goal_min')
+    except Exception:
+        pass
+    # 2) Cache locale
     now = time.time()
     c = _EVENTS_CACHE.get(fixture_id)
     if c and now - c[0] < _EVENTS_TTL:
         return c[1]
+    # 3) Fallback: chiama API events (solo se non in tracking e non in cache)
     data = _apisports_get('/fixtures/events', {'fixture': fixture_id})
     fgm = None
     if isinstance(data, dict):
