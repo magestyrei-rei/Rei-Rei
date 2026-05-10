@@ -717,10 +717,6 @@ def register_picks_ui(app, get_adv_data):
                     if lid not in _WL: continue
                 except Exception:
                     pass
-                try: odds = _get_live_odds(fid)
-                except Exception: odds = None
-                parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
-                if not parsed: continue
                 try:
                     adv_data = get_adv_data()
                     lg_key, lg_data = _find_league_in_model(adv_data, lid, ctx.get('league_name'), ctx.get('country'))
@@ -747,16 +743,19 @@ def register_picks_ui(app, get_adv_data):
                 # Solo 1X2 e BTTS: evita mismatch FT-totale vs gol-rimanenti per over/under
                 _live_valid = {'1', 'X', '2', 'btts_si', 'btts_no', 'dc_1X', 'dc_12', 'dc_X2'}
                 probs = {k: v for k, v in probs.items() if k in _live_valid and k not in _settled}
-                if not probs: continue
-                raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital)
-                # ML hints: probabilità modello su TUTTI i mercati (informativo, no edge)
+                # ML hints: prob modello su TUTTI i mercati (informativo, no edge) - sempre presenti
                 _all_labels = {'1':'1 (CASA)','X':'X (PAREGGIO)','2':'2 (OSPITE)','over_1_5':'OVER 1.5','over_2_5':'OVER 2.5','over_3_5':'OVER 3.5','under_1_5':'UNDER 1.5','under_2_5':'UNDER 2.5','under_3_5':'UNDER 3.5','btts_si':'BTTS SI','btts_no':'BTTS NO'}
-                _all_probs = _extract_probs(lg_data, m, sh, sa)[0]  # probs complete (no filtro _settled)
+                _all_probs = _extract_probs(lg_data, m, sh, sa)[0]
                 _over_mkts = {'over_1_5','over_2_5','over_3_5','under_1_5','under_2_5','under_3_5'}
                 ml_hints = sorted([{'market':k,'label':_all_labels.get(k,k),'prob':round(v*100,1)} for k,v in _all_probs.items() if k in _all_labels and k not in _settled and (v >= 0.40 if k in _over_mkts else v >= 0.50)], key=lambda x:-x['prob'])[:6]
+                # Quote live opzionali: disponibili solo per leghe maggiori (Bundesliga, PL, etc.)
+                try: odds = _get_live_odds(fid)
+                except Exception: odds = None
+                parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
+                raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital) if (parsed and probs) else []
                 _label_map = dict(_PICKS_MARKET_LABELS)
                 picks = [{'market': rp['market'], 'market_label': _label_map.get(rp['market'], rp['market']), 'prob': rp['model_prob'], 'fair_quota': round(1.0/rp['model_prob'], 3) if rp['model_prob'] > 0 else 0, 'bookie': rp['bookie'], 'bookie_quota': rp['quota'], 'edge_pct': rp['edge_pct'], 'stake_pct': round(rp['stake_pct']*100.0, 2), 'stake_eur': rp['stake_eur']} for rp in raw_picks]
-                if not picks: continue
+                if not picks and not ml_hints: continue
                 picks.sort(key=lambda x: -x['edge_pct'])
                 # Log picks best-effort
                 try:
