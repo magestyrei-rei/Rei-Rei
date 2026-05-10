@@ -455,7 +455,35 @@ def register(app, query_fn):
             rolling.append({'n': i + 1, 'date': (rows[i].get('date_utc') or '')[:10],
                 'over_2_5': _rate(batch, o25), 'btts': _rate(batch, btts), 'early_goal': _rate(batch, eg)})
 
-        return jsonify({'league': league_name, 'total': len(rows),
+        # Aggiungi ml_acc (win rate da ml_picks_log) per ogni rolling entry
+        try:
+            ml_rows = pset._turso_select_rows(
+                "SELECT date(settled_at,'unixepoch') as d, result FROM ml_picks_log "
+                "WHERE league_name IN (%s) AND result IS NOT NULL ORDER BY settled_at" % _ph,
+                _lnames
+            )
+            _daily = {}
+            for r in ml_rows:
+                d = (r.get('d') or '')[:10]
+                if d:
+                    if d not in _daily: _daily[d] = [0, 0]
+                    _daily[d][1] += 1
+                    if r.get('result') == 'WIN': _daily[d][0] += 1
+            _sorted_d = sorted(_daily.keys())
+            _cum_w, _cum_n = 0, 0
+            _acc_by_date = {}
+            for d in _sorted_d:
+                _cum_w += _daily[d][0]; _cum_n += _daily[d][1]
+                _acc_by_date[d] = round(_cum_w / _cum_n * 100, 1) if _cum_n > 0 else None
+            for entry in rolling:
+                rd = entry.get('date', '')
+                matching = [d for d in _sorted_d if d <= rd]
+                entry['ml_acc'] = _acc_by_date.get(max(matching)) if matching else None
+        except Exception:
+            for entry in rolling:
+                entry['ml_acc'] = None
+        
+return jsonify({'league': league_name, 'total': len(rows),
                         'seasons': seasons_out, 'rolling': rolling[-50:]})
 
     @app.route('/api/ml-picks-leagues')
