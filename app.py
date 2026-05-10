@@ -307,6 +307,11 @@ def poll_once():
     leagues_ids = set(
         r['id'] for r in query("SELECT id FROM leagues")
     )
+    try:
+        from odds_logger import LEAGUE_WHITELIST as _WL
+        _tracking_ids = leagues_ids | _WL
+    except Exception:
+        _tracking_ids = leagues_ids
 
     data     = api_get('/fixtures', {'live': 'all'})
     errors   = data.get('errors', {})
@@ -321,7 +326,7 @@ def poll_once():
 
     for fx in fixtures:
         lid = fx['league']['id']
-        if lid not in leagues_ids:
+        if lid not in _tracking_ids:
             continue
 
         fid   = fx['fixture']['id']
@@ -355,23 +360,24 @@ def poll_once():
             'qualifies':        qualifies,
         }
 
-        live_now.append({
-            'id':            fid,
-            'minute':        fx['fixture']['status']['elapsed'] or 0,
-            'status':        fx['fixture']['status']['short'],
-            'home':          home,
-            'away':          away,
-            'league_id':     lid,
-            'league_name':   fx['league']['name'],
-            'country':       fx['league']['country'],
-            'score_home':    sc_h,
-            'score_away':    sc_a,
-            'ht_home':       fx['score']['halftime']['home'],
-            'ht_away':       fx['score']['halftime']['away'],
-            'first_goal_min':  fg_min,
-            'first_goal_team': fg_team,
-            'qualifies':       qualifies,
-        })
+        if lid in leagues_ids:
+            live_now.append({
+                'id':            fid,
+                'minute':        fx['fixture']['status']['elapsed'] or 0,
+                'status':        fx['fixture']['status']['short'],
+                'home':          home,
+                'away':          away,
+                'league_id':     lid,
+                'league_name':   fx['league']['name'],
+                'country':       fx['league']['country'],
+                'score_home':    sc_h,
+                'score_away':    sc_a,
+                'ht_home':       fx['score']['halftime']['home'],
+                'ht_away':       fx['score']['halftime']['away'],
+                'first_goal_min':  fg_min,
+                'first_goal_team': fg_team,
+                'qualifies':       qualifies,
+            })
 
     with _lock:
         live_store['fixtures']   = live_now
