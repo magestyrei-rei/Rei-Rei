@@ -176,6 +176,15 @@
   <div id="tr-picks-accuracy" style="margin-top:16px;background:#161b22;border-radius:8px;padding:12px;border:1px solid #30363d">
     <p style="color:#8b949e;font-size:13px;margin:0">Caricamento accuratezza pick ML...</p>
   </div>
+<div id="tr-pred-history" style="margin-top:20px;background:#1e293b;border-radius:8px;padding:14px;border:1px solid #334155">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+<h3 style="margin:0;color:#f1f5f9;font-size:14px;flex:1">&#x1F4CB; Storico Predizioni ML</h3>
+<button onclick="verifyPredictions()" style="padding:5px 12px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:5px;font-size:12px;cursor:pointer">&#x21BB; Verifica esiti</button>
+<button onclick="downloadPredCSV()" style="padding:5px 12px;background:#14532d;color:#86efac;border:1px solid #16a34a;border-radius:5px;font-size:12px;cursor:pointer">&#x2B07; CSV</button>
+<button onclick="clearPredHistory()" style="padding:5px 12px;background:#3b0f0f;color:#fca5a5;border:1px solid #7f1d1d;border-radius:5px;font-size:12px;cursor:pointer">&#x1F5D1; Svuota</button>
+</div>
+<div id="tr-pred-table" style="font-size:12px;color:#64748b">Nessuna predizione. Apri &#x1F52E; Live Predizioni per salvare automaticamente.</div>
+</div>
 </section>
 
 <section class="view" id="view-how">
@@ -296,7 +305,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "eg" && !EG) loadEG();
     if (t.dataset.view === "picks") loadPicks();
     if (t.dataset.view === "acc") loadAccuracy();
-    if (t.dataset.view == "trend") loadTrend();
+    if (t.dataset.view == "trend") { loadTrend(); refreshPredHistory(); }
      if (t.dataset.view === "pred") loadPred();
   });
 });
@@ -627,7 +636,74 @@ async function loadPred(){
       }).join("");
       return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">${f.home} vs ${f.away}</div><div style="font-size:12px;color:#64748b;margin-bottom:10px">${f.league_name||""} · ${f.score} · ${f.minute}'</div>${bars}</div>`;
     }).join("");
-  }catch(e){st.textContent="Errore: "+e.message;}
+  
+// Salva top-2 predizioni in localStorage
+try{const now=Date.now(),log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');for(const f of fs){const top2=(f.ml_hints||[]).slice(0,2);if(!top2.length)continue;if(log.find(e=>String(e.fixture_id)===String(f.fixture_id)&&(now-e.ts)<600000))continue;log.push({id:String(f.fixture_id)+'_'+now,fixture_id:f.fixture_id,ts:now,match:f.home+' vs '+f.away,league:f.league_name||'',league_id:f.league_id,score_at_pred:f.score,minute_at_pred:f.minute,preds:top2.map(h=>({label:h.label,prob:h.prob})),result:null,verified:[null,null]});}while(log.length>200)log.shift();localStorage.setItem('rr_pred_log',JSON.stringify(log));}catch(_){}
+}catch(e){st.textContent="Errore: "+e.message;}
 }
+// === Storico Predizioni ===
+function refreshPredHistory(){
+  const el=document.getElementById('tr-pred-table');if(!el)return;
+  let log;try{log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');}catch(e){log=[];}
+  const entries=[...log].reverse().slice(0,10);
+  if(!entries.length){el.innerHTML='<p style="color:#64748b;font-size:13px;margin:0">Nessuna predizione. Apri &#x1F52E; Live Predizioni per salvare automaticamente.</p>';return;}
+  const fmt=ts=>new Date(ts).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const esito=v=>v===null?'<span style="color:#94a3b8">&#x23F3;</span>':v?'<span style="color:#22c55e;font-size:16px">&#x2713;</span>':'<span style="color:#ef4444;font-size:16px">&#x2717;</span>';
+  let h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:1px solid #334155"><th style="padding:6px 8px;color:#64748b;text-align:left;font-weight:400;font-size:11px">Data</th><th style="padding:6px 8px;color:#64748b;text-align:left;font-weight:400;font-size:11px">Partita</th><th style="padding:6px 8px;color:#64748b;text-align:left;font-weight:400;font-size:11px">Pred 1</th><th style="padding:6px 8px;color:#64748b;text-align:left;font-weight:400;font-size:11px">Pred 2</th><th style="padding:6px 8px;color:#64748b;text-align:center;font-weight:400;font-size:11px">Esito</th></tr></thead><tbody>';
+  for(const e of entries){const p1=e.preds[0],p2=e.preds[1];h+=`<tr style="border-top:1px solid #1e293b"><td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">${fmt(e.ts)}</td><td style="padding:5px 8px"><div style="font-weight:600">${e.match}</div><div style="font-size:11px;color:#64748b">${e.league} &middot; ${e.score_at_pred} &middot; ${e.minute_at_pred}'</div></td><td style="padding:5px 8px"><span>${p1.label}</span> <span style="color:#f59e0b">${p1.prob}%</span></td><td style="padding:5px 8px">${p2?`<span>${p2.label}</span> <span style="color:#f59e0b">${p2.prob}%</span>`:'<span style="color:#475569">&mdash;</span>'}</td><td style="padding:5px 8px;text-align:center">${esito(e.verified[0])}${p2?' '+esito(e.verified[1]):''}</td></tr>`;}
+  h+='</tbody></table></div>';
+  const vf=entries.filter(e=>e.verified[0]!==null);
+  if(vf.length>0){const wins=vf.filter(e=>e.verified[0]===true).length;const pct=Math.round(wins/vf.length*100);h+=`<div style="margin-top:8px;font-size:12px;color:#94a3b8">Verificate: <b style="color:#e2e8f0">${vf.length}</b> &middot; Hit rate pred 1: <b style="color:${pct>=55?'#22c55e':pct>=45?'#f59e0b':'#ef4444'}">${pct}%</b></div>`;}
+  el.innerHTML=h;
+}
+function verifyPred(label,h,a){
+  const t=h+a,l=(label||'').toUpperCase();
+  if(l.includes('1 (CASA)'))return h>a;if(l.includes('2 (OSPITE)'))return a>h;
+  if(l.includes('PAREGGIO'))return h===a;
+  if(l.includes('OVER 3.5'))return t>3.5;if(l.includes('UNDER 3.5'))return t<3.5;
+  if(l.includes('OVER 2.5'))return t>2.5;if(l.includes('UNDER 2.5'))return t<2.5;
+  if(l.includes('OVER 1.5'))return t>1.5;if(l.includes('UNDER 1.5'))return t<1.5;
+  if(l.includes('BTTS SI'))return h>0&&a>0;if(l.includes('BTTS NO'))return!(h>0&&a>0);
+  return null;
+}
+async function verifyPredictions(){
+  let log;try{log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');}catch(e){return;}
+  const pending=log.filter(e=>e.verified[0]===null);
+  if(!pending.length){alert('Nessuna predizione da verificare (tutte verificate o nessuna salvata).');return;}
+  const btn=document.querySelector('[onclick="verifyPredictions()"]');
+  if(btn){btn.disabled=true;btn.textContent='Verifica...';}
+  let updated=0;
+  for(const entry of pending.slice(0,20)){
+    try{
+      const resp=await fetch('/api/fixture-result/'+entry.fixture_id,{cache:'no-store'});
+      const d=await resp.json();
+      if(d.finished&&d.home_score!=null){
+        entry.result={home:d.home_score,away:d.away_score};
+        entry.verified=entry.preds.map(p=>verifyPred(p.label,d.home_score,d.away_score));
+        updated++;
+      }
+    }catch(_){}
+    await new Promise(res=>setTimeout(res,300));
+  }
+  if(updated>0)localStorage.setItem('rr_pred_log',JSON.stringify(log));
+  if(btn){btn.disabled=false;btn.innerHTML='&#x21BB; Verifica esiti';}
+  refreshPredHistory();
+}
+function downloadPredCSV(){
+  let log;try{log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');}catch(e){return;}
+  if(!log.length){alert('Nessuna predizione da scaricare.');return;}
+  const rows=[['Data','Partita','Lega','Score','Minuto','Pred1','Prob1%','Esito1','Pred2','Prob2%','Esito2']];
+  const fmt=ts=>new Date(ts).toLocaleString('it-IT');
+  const es=v=>v===null?'Pending':v?'SI':'NO';
+  for(const e of[...log].reverse())rows.push([fmt(e.ts),e.match,e.league,e.score_at_pred,e.minute_at_pred,(e.preds[0]||{}).label||'',(e.preds[0]||{}).prob||'',es(e.verified[0]),(e.preds[1]||{}).label||'',(e.preds[1]||{}).prob||'',es(e.verified[1])]);
+  const csv=rows.map(r=>r.map(cv=>'"'+String(cv).replace(/"/g,'""')+'"').join(',')).join('
+');
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='rei-rei-predizioni-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
+function clearPredHistory(){if(!confirm('Svuotare lo storico? Questa azione non si annulla.'))return;localStorage.removeItem('rr_pred_log');refreshPredHistory();}
+
 </script>
 </body>
