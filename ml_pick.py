@@ -799,6 +799,30 @@ def register_picks_ui(app, get_adv_data):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
+
+    @app.route('/api/fixture-result/<int:fixture_id>')
+    def api_fixture_result(fixture_id):
+        """Ritorna lo stato/risultato finale di una fixture per verifica predizioni."""
+        data = _apisports_get('/fixtures', {'id': fixture_id})
+        if not isinstance(data, dict):
+            return jsonify({'error': 'bad response', 'fixture_id': fixture_id, 'finished': False}), 502
+        resps = data.get('response') or []
+        if not resps:
+            return jsonify({'error': 'not found', 'fixture_id': fixture_id, 'finished': False}), 404
+        f = resps[0]
+        status = (f.get('fixture') or {}).get('status') or {}
+        goals = f.get('goals') or {}
+        short = status.get('short', '')
+        finished = short in ('FT', 'AET', 'PEN', 'AWD', 'WO')
+        return jsonify({
+            'fixture_id': fixture_id,
+            'status_short': short,
+            'status_long': status.get('long', ''),
+            'finished': finished,
+            'home_score': goals.get('home'),
+            'away_score': goals.get('away')
+        })
+
     @app.route('/picks')
     def picks_page():
         return _Response(_PICKS_HTML, mimetype='text/html')
