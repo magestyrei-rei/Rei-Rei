@@ -696,8 +696,7 @@ function downloadPredCSV(){
   const fmt=ts=>new Date(ts).toLocaleString('it-IT');
   const es=v=>v===null?'Pending':v?'SI':'NO';
   for(const e of[...log].reverse())rows.push([fmt(e.ts),e.match,e.league,e.score_at_pred,e.minute_at_pred,(e.preds[0]||{}).label||'',(e.preds[0]||{}).prob||'',es(e.verified[0]),(e.preds[1]||{}).label||'',(e.preds[1]||{}).prob||'',es(e.verified[1])]);
-  const csv=rows.map(r=>r.map(cv=>'"'+String(cv).replace(/"/g,'""')+'"').join(',')).join('
-');
+  const csv=rows.map(r=>r.map(cv=>'"'+String(cv).replace(/"/g,'""')+'"').join(',')).join('\n');
   const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='rei-rei-predizioni-'+new Date().toISOString().slice(0,10)+'.csv';
