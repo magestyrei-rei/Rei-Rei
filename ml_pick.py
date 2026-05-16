@@ -13,6 +13,7 @@ import time
 import re
 import urllib.request
 import urllib.parse
+import threading
 from flask import jsonify, request
 
 APISPORTS_BASE = 'https://v3.football.api-sports.io'
@@ -25,6 +26,9 @@ _LIVE_FIX_CACHE = {'ts': 0, 'data': None}
 _LIVE_FIX_TTL = 45       # secondi
 _EVENTS_CACHE = {}  # {fixture_id: (ts, first_goal_minute_or_None)}
 _EVENTS_TTL = 120  # secondi - gli eventi goal non cambiano retroattivamente
+
+# Background cache per predizioni live (aggiornato ogni 5 min dal thread daemon)
+_SERVER_PRED_CACHE = {'fixtures': [], 'pick_cache': {}, 'last_update': 0}
 
 # -------------------- API-Football helpers --------------------
 
@@ -682,6 +686,128 @@ def _picks_best_quota(parsed, mkt):
         return None, None
 
 
+
+
+def _compute_fixture_entry(ctx, get_adv_data, capital=1000.0, kelly=0.25, edge_min=0.03, stake_max=0.05):
+    """Calcola picks per una singola fixture live. Ritorna dict entry o None."""
+    m = ctx.get('minute')
+    if m is None or m < 1 or m > 120:
+        return None
+    fid = ctx.get('fixture_id')
+    lid = ctx.get('league_id')
+    sh = ctx.get('score_home', 0) or 0
+    sa = ctx.get('score_away', 0) or 0
+    if sh + sa == 0:
+        return None
+    fgm = _get_first_goal_minute(fid)
+    if fgm is None or fgm > 16:
+        return None
+    try:
+        from odds_logger import LEAGUE_WHITELIST as _WL
+        if lid not in _WL:
+            return None
+    except Exception:
+        pass
+    try:
+        adv_data = get_adv_data()
+        lg_key, lg_data = _find_league_in_model(adv_data, lid, ctx.get('league_name'), ctx.get('country'))
+    except Exception:
+        lg_data = None
+    if not lg_data:
+        return None
+    probs, _ = _extract_probs(lg_data, m, sh, sa)
+    if not probs:
+        return None
+    try:
+        import ml_poisson as _mpo
+        _pw = float(os.getenv('POISSON_WEIGHT', '0.4'))
+        _pois = _mpo.live_poisson_probs(m, sh, sa, lid)
+        probs = {k: (1 - _pw) * v + _pw * _pois.get(k, v) for k, v in probs.items()}
+    except Exception:
+        pass
+    _settled = set()
+    _tot = sh + sa
+    if _tot >= 2: _settled.update(['over_1_5', 'under_1_5'])
+    if _tot >= 3: _settled.update(['over_2_5', 'under_2_5'])
+    if _tot >= 4: _settled.update(['over_3_5', 'under_3_5'])
+    if sh > 0 and sa > 0: _settled.update(['btts_si', 'btts_no'])
+    _live_valid = {'1', 'X', '2', 'btts_si', 'btts_no', 'dc_1X', 'dc_12', 'dc_X2'}
+    probs = {k: v for k, v in probs.items() if k in _live_valid and k not in _settled}
+    _all_labels = {'1': '1 (CASA)', 'X': 'X (PAREGGIO)', '2': '2 (OSPITE)', 'over_1_5': 'OVER 1.5', 'over_2_5': 'OVER 2.5', 'over_3_5': 'OVER 3.5', 'under_1_5': 'UNDER 1.5', 'under_2_5': 'UNDER 2.5', 'under_3_5': 'UNDER 3.5', 'btts_si': 'BTTS SI', 'btts_no': 'BTTS NO'}
+    _all_probs = _extract_probs(lg_data, m, sh, sa)[0]
+    _over_mkts = {'over_1_5', 'over_2_5', 'over_3_5', 'under_1_5', 'under_2_5', 'under_3_5'}
+    ml_hints = sorted([{'market': k, 'label': _all_labels.get(k, k), 'prob': round(v * 100, 1)} for k, v in _all_probs.items() if k in _all_labels and k not in _settled and (v >= 0.40 if k in _over_mkts else v >= 0.50)], key=lambda x: -x['prob'])[:6]
+    try:
+        odds = _get_live_odds(fid)
+    except Exception:
+        odds = None
+    parsed = _parse_odds_payload(odds) if isinstance(odds, dict) else {}
+    raw_picks = _compute_picks(probs, parsed, 'apifootball-live', kelly, edge_min, stake_max, capital) if (parsed and probs) else []
+    _label_map = dict(_PICKS_MARKET_LABELS)
+    picks = [{'market': rp['market'], 'market_label': _label_map.get(rp['market'], rp['market']), 'prob': rp['model_prob'], 'fair_quota': round(1.0 / rp['model_prob'], 3) if rp['model_prob'] > 0 else 0, 'bookie': rp['bookie'], 'bookie_quota': rp['quota'], 'edge_pct': rp['edge_pct'], 'stake_pct': round(rp['stake_pct'] * 100.0, 2), 'stake_eur': rp['stake_eur']} for rp in raw_picks]
+    if not picks and not ml_hints:
+        return None
+    picks.sort(key=lambda x: -x['edge_pct'])
+    try:
+        import predictions_settlement as _pset
+        _lctx = {'league_name': ctx.get('league_name'), 'home': ctx.get('home'), 'away': ctx.get('away')}
+        _pset.log_picks(fid, _lctx, picks[:6])
+    except Exception:
+        pass
+    return {
+        'fixture_id': fid, 'league_id': lid,
+        'league_name': ctx.get('league_name'), 'country': ctx.get('country'),
+        'home': ctx.get('home'), 'away': ctx.get('away'),
+        'minute': m, 'score': '%d-%d' % (sh, sa),
+        'picks': picks[:6], 'ml_hints': ml_hints,
+    }
+
+
+def _run_pred_refresh(get_adv_data, capital=1000.0, kelly=0.25, edge_min=0.03, stake_max=0.05):
+    """Aggiorna _SERVER_PRED_CACHE: picks solo per fixture nuove, score/min per le esistenti."""
+    live = _get_live_fixtures_af()
+    if not isinstance(live, dict):
+        return
+    current = {}
+    for f in (live.get('response') or [])[:30]:
+        ctx = _fixture_to_model_ctx(f)
+        if ctx:
+            current[str(ctx['fixture_id'])] = ctx
+    cached_ids = set(_SERVER_PRED_CACHE['pick_cache'].keys())
+    new_ids = set(current.keys()) - cached_ids
+    removed_ids = cached_ids - set(current.keys())
+    for fid in removed_ids:
+        _SERVER_PRED_CACHE['pick_cache'].pop(fid, None)
+    for fid, ctx in current.items():
+        if fid in _SERVER_PRED_CACHE['pick_cache']:
+            _SERVER_PRED_CACHE['pick_cache'][fid]['minute'] = ctx['minute']
+            _SERVER_PRED_CACHE['pick_cache'][fid]['score'] = '%d-%d' % (ctx['score_home'], ctx['score_away'])
+    for fid in new_ids:
+        try:
+            entry = _compute_fixture_entry(current[fid], get_adv_data, capital, kelly, edge_min, stake_max)
+            if entry:
+                _SERVER_PRED_CACHE['pick_cache'][fid] = entry
+        except Exception as e:
+            print('[bg_pred] fixture %s: %s' % (fid, e))
+    results = list(_SERVER_PRED_CACHE['pick_cache'].values())
+    results.sort(key=lambda r: -(r['picks'][0]['edge_pct'] if r['picks'] else 0))
+    _SERVER_PRED_CACHE['fixtures'] = results
+    _SERVER_PRED_CACHE['last_update'] = int(time.time())
+
+
+def _bg_pred_worker(get_adv_data):
+    """Thread daemon: aggiorna la cache predizioni ogni 5 minuti, 24/7."""
+    try:
+        _run_pred_refresh(get_adv_data)
+    except Exception as e:
+        print('[bg_pred] first run error:', e)
+    while True:
+        time.sleep(300)
+        try:
+            _run_pred_refresh(get_adv_data)
+        except Exception as e:
+            print('[bg_pred] worker error:', e)
+
 def register_picks_ui(app, get_adv_data):
     """Registra /api/ml-live-picks-all, /api/ml-accuracy-stats, /picks, /ml-accuracy."""
     @app.route('/api/ml-live-picks-all')
@@ -830,6 +956,23 @@ def register_picks_ui(app, get_adv_data):
     @app.route('/ml-accuracy')
     def ml_accuracy_page():
         return _Response(_ACCURACY_HTML, mimetype='text/html')
+
+    @app.route('/api/ml-live-pred-cached')
+    def api_ml_live_pred_cached():
+        """Cache server-side delle predizioni live (thread aggiorna ogni 5 min)."""
+        age = int(time.time()) - _SERVER_PRED_CACHE['last_update'] if _SERVER_PRED_CACHE['last_update'] else None
+        return jsonify({
+            'fixtures': _SERVER_PRED_CACHE['fixtures'],
+            'fixtures_with_picks': len(_SERVER_PRED_CACHE['fixtures']),
+            'last_update': _SERVER_PRED_CACHE['last_update'],
+            'cache_age_secs': age,
+        })
+
+    # Avvia il thread background per aggiornamento predizioni ogni 5 minuti
+    _bg_t = threading.Thread(target=_bg_pred_worker, args=(get_adv_data,), daemon=True)
+    _bg_t.start()
+    print('[bg_pred] Background prediction thread started.')
+
 
 
 _PICKS_HTML = """<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Pick Live</title>
