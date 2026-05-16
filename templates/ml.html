@@ -681,7 +681,9 @@ async function loadPred(){
   const st=$("pred-status"),r=$("pred-results");
   st.textContent="Caricamento...";r.innerHTML="";
   try{
-    const x=await fetch("/api/ml-live-picks-all?capital=1000&kelly=0.25&edge_min=0.03&stake_max=0.05",{cache:"no-store"}),j=await x.json();
+    let j=null;
+    try{const _cr=await fetch('/api/ml-live-pred-cached',{cache:'no-store'});const _cj=await _cr.json();if(_cj&&_cj.last_update>0){j=_cj;j.fixtures_total=j.fixtures_with_picks||0;j.params={capital:1000,kelly_mult:0.25,edge_min:0.03,stake_max:0.05};}}catch(_e){}
+    if(!j){const _x=await fetch('/api/ml-live-picks-all?capital=1000&kelly=0.25&edge_min=0.03&stake_max=0.05',{cache:'no-store'}),_jx=await _x.json();j=_jx;}
     if(j.error){st.textContent="Errore: "+j.error;return;}
     const fs=(j.fixtures||[]).filter(f=>f.ml_hints&&f.ml_hints.length);
     st.innerHTML="Live: <b>"+j.fixtures_total+"</b> fixture &middot; <b>"+fs.length+"</b> con predizione ML";
