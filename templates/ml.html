@@ -38,7 +38,64 @@
   .notes{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-top:18px;font-size:12px;color:#94a3b8;line-height:1.5}
   .notes b{color:#e2e8f0}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js">
+// --- AUTO-REFRESH LIVE PREDIZIONI (ogni 5 min, cache per fixture) ---
+window._mlPickCache={};
+var _predTimer=null,_predCountdown=null;
+window._predSecsLeft=300;
+function _updatePredCd(){
+  var cd=document.getElementById('pred-auto-cd');
+  if(!cd)return;
+  var m=String(Math.floor(window._predSecsLeft/60)).padStart(2,'0'),
+      s=String(window._predSecsLeft%60).padStart(2,'0');
+  cd.textContent='⏱ '+m+':'+s;
+}
+function startPredAutoRefresh(){
+  stopPredAutoRefresh();
+  window._predSecsLeft=300;
+  _updatePredCd();
+  _predTimer=setInterval(autoRefreshPred,300000);
+  _predCountdown=setInterval(function(){
+    window._predSecsLeft=window._predSecsLeft<=1?300:window._predSecsLeft-1;
+    _updatePredCd();
+  },1000);
+}
+function stopPredAutoRefresh(){
+  clearInterval(_predTimer);_predTimer=null;
+  clearInterval(_predCountdown);_predCountdown=null;
+  var cd=document.getElementById('pred-auto-cd');
+  if(cd)cd.textContent='';
+}
+async function autoRefreshPred(){
+  try{
+    var xf=await fetch('/api/ml-live-fixtures-af',{cache:'no-store'}),
+        jf=await xf.json(),
+        liveFixes=jf.fixtures||[],
+        liveIds=new Set(liveFixes.map(function(f){return String(f.fixture_id);}));
+    for(var id of Object.keys(window._mlPickCache)){if(!liveIds.has(id))delete window._mlPickCache[id];}
+    var hasNew=liveFixes.some(function(f){return !window._mlPickCache[String(f.fixture_id)];});
+    if(hasNew||liveIds.size===0||Object.keys(window._mlPickCache).length===0){
+      await loadPred();
+    }else{
+      liveFixes.forEach(function(fx){
+        var se=document.querySelector('[data-fid-score="'+fx.fixture_id+'"]'),
+            me=document.querySelector('[data-fid-min="'+fx.fixture_id+'"]');
+        if(se)se.textContent=fx.score_home+'-'+fx.score_away;
+        if(me)me.textContent=fx.minute+"'";
+        var cid=String(fx.fixture_id);
+        if(window._mlPickCache[cid]){
+          window._mlPickCache[cid].score_home=fx.score_home;
+          window._mlPickCache[cid].score_away=fx.score_away;
+          window._mlPickCache[cid].minute=fx.minute;
+        }
+      });
+    }
+    window._predSecsLeft=300;
+    _updatePredCd();
+  }catch(e){}
+}
+
+</script>
 </head>
 <body>
 <header>
@@ -251,7 +308,7 @@
    <section class="view" id="view-pred">
      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
        <div id="pred-status" style="color:#94a3b8;font-size:13px;flex:1">Caricamento...</div>
-       <button onclick="loadPred()" style="padding:6px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">&#x21bb; Aggiorna</button>
+       <button onclick="loadPred();startPredAutoRefresh();" style="padding:6px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">&#x21bb; Aggiorna</button><span id="pred-auto-cd" style="font-size:11px;color:#94a3b8;margin-left:10px;font-variant-numeric:tabular-nums"></span>
      </div>
      <div id="pred-results" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px"></div>
    </section>
@@ -306,7 +363,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "picks") loadPicks();
     if (t.dataset.view === "acc") loadAccuracy();
     if (t.dataset.view == "trend") { loadTrend(); refreshPredHistory(); }
-     if (t.dataset.view === "pred") loadPred();
+     if (t.dataset.view === "pred") { loadPred(); startPredAutoRefresh(); } else { stopPredAutoRefresh(); }
   });
 });
 
@@ -634,7 +691,7 @@ async function loadPred(){
         const c=h.prob>=70?"#22c55e":h.prob>=55?"#f59e0b":"#38bdf8";
         return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="font-size:12px;color:#cbd5e1;width:130px;flex-shrink:0">${h.label}</span><div style="flex:1;height:7px;background:#0f172a;border-radius:4px;overflow:hidden"><div style="width:${h.prob}%;height:100%;background:${c};border-radius:4px"></div></div><span style="font-size:12px;color:#64748b;width:36px;text-align:right">${h.prob}%</span></div>`;
       }).join("");
-      return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">${f.home} vs ${f.away}</div><div style="font-size:12px;color:#64748b;margin-bottom:10px">${f.league_name||""} · ${f.score} · ${f.minute}'</div>${bars}</div>`;
+      return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">${f.home} vs ${f.away}</div><div style="font-size:12px;color:#64748b;margin-bottom:10px">${f.league_name||""} · <span data-fid-score="${f.fixture_id}">${f.score}</span> · <span data-fid-min="${f.fixture_id}">${f.minute}'</span></div>${bars}</div>`;
     }).join("");
   
 // Salva top-2 predizioni in localStorage
@@ -687,7 +744,8 @@ async function verifyPredictions(){
   }
   if(updated>0)localStorage.setItem('rr_pred_log',JSON.stringify(log));
   if(btn){btn.disabled=false;btn.innerHTML='&#x21BB; Verifica esiti';}
-  refreshPredHistory();
+  if(Array.isArray(fs))fs.forEach(function(f){window._mlPickCache[String(f.fixture_id)]=f;});window._predSecsLeft=300;
+    refreshPredHistory();
 }
 function downloadPredCSV(){
   let log;try{log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');}catch(e){return;}
