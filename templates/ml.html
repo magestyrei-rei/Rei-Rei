@@ -38,64 +38,7 @@
   .notes{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-top:18px;font-size:12px;color:#94a3b8;line-height:1.5}
   .notes b{color:#e2e8f0}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js">
-// --- AUTO-REFRESH LIVE PREDIZIONI (ogni 5 min, cache per fixture) ---
-window._mlPickCache={};
-var _predTimer=null,_predCountdown=null;
-window._predSecsLeft=300;
-function _updatePredCd(){
-  var cd=document.getElementById('pred-auto-cd');
-  if(!cd)return;
-  var m=String(Math.floor(window._predSecsLeft/60)).padStart(2,'0'),
-      s=String(window._predSecsLeft%60).padStart(2,'0');
-  cd.textContent='⏱ '+m+':'+s;
-}
-function startPredAutoRefresh(){
-  stopPredAutoRefresh();
-  window._predSecsLeft=300;
-  _updatePredCd();
-  _predTimer=setInterval(autoRefreshPred,300000);
-  _predCountdown=setInterval(function(){
-    window._predSecsLeft=window._predSecsLeft<=1?300:window._predSecsLeft-1;
-    _updatePredCd();
-  },1000);
-}
-function stopPredAutoRefresh(){
-  clearInterval(_predTimer);_predTimer=null;
-  clearInterval(_predCountdown);_predCountdown=null;
-  var cd=document.getElementById('pred-auto-cd');
-  if(cd)cd.textContent='';
-}
-async function autoRefreshPred(){
-  try{
-    var xf=await fetch('/api/ml-live-fixtures-af',{cache:'no-store'}),
-        jf=await xf.json(),
-        liveFixes=jf.fixtures||[],
-        liveIds=new Set(liveFixes.map(function(f){return String(f.fixture_id);}));
-    for(var id of Object.keys(window._mlPickCache)){if(!liveIds.has(id))delete window._mlPickCache[id];}
-    var hasNew=liveFixes.some(function(f){return !window._mlPickCache[String(f.fixture_id)];});
-    if(hasNew||liveIds.size===0||Object.keys(window._mlPickCache).length===0){
-      await loadPred();
-    }else{
-      liveFixes.forEach(function(fx){
-        var se=document.querySelector('[data-fid-score="'+fx.fixture_id+'"]'),
-            me=document.querySelector('[data-fid-min="'+fx.fixture_id+'"]');
-        if(se)se.textContent=fx.score_home+'-'+fx.score_away;
-        if(me)me.textContent=fx.minute+"'";
-        var cid=String(fx.fixture_id);
-        if(window._mlPickCache[cid]){
-          window._mlPickCache[cid].score_home=fx.score_home;
-          window._mlPickCache[cid].score_away=fx.score_away;
-          window._mlPickCache[cid].minute=fx.minute;
-        }
-      });
-    }
-    window._predSecsLeft=300;
-    _updatePredCd();
-  }catch(e){}
-}
-
-</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
@@ -323,6 +266,63 @@ async function autoRefreshPred(){
 </main>
 
 <script>
+// --- AUTO-REFRESH LIVE PREDIZIONI (ogni 5 min, cache per fixture) ---
+window._mlPickCache={};
+var _predTimer=null,_predCountdown=null;
+window._predSecsLeft=300;
+function _updatePredCd(){
+  var cd=document.getElementById('pred-auto-cd');
+  if(!cd)return;
+  var m=String(Math.floor(window._predSecsLeft/60)).padStart(2,'0'),
+      s=String(window._predSecsLeft%60).padStart(2,'0');
+  cd.textContent='⏱ '+m+':'+s;
+}
+function startPredAutoRefresh(){
+  stopPredAutoRefresh();
+  window._predSecsLeft=300;
+  _updatePredCd();
+  _predTimer=setInterval(autoRefreshPred,300000);
+  _predCountdown=setInterval(function(){
+    window._predSecsLeft=window._predSecsLeft<=1?300:window._predSecsLeft-1;
+    _updatePredCd();
+  },1000);
+}
+function stopPredAutoRefresh(){
+  clearInterval(_predTimer);_predTimer=null;
+  clearInterval(_predCountdown);_predCountdown=null;
+  var cd=document.getElementById('pred-auto-cd');
+  if(cd)cd.textContent='';
+}
+async function autoRefreshPred(){
+  try{
+    var xf=await fetch('/api/ml-live-fixtures-af',{cache:'no-store'}),
+        jf=await xf.json(),
+        liveFixes=jf.fixtures||[],
+        liveIds=new Set(liveFixes.map(function(f){return String(f.fixture_id);}));
+    for(var id of Object.keys(window._mlPickCache)){if(!liveIds.has(id))delete window._mlPickCache[id];}
+    var hasNew=liveFixes.some(function(f){return !window._mlPickCache[String(f.fixture_id)];});
+    if(hasNew||liveIds.size===0||Object.keys(window._mlPickCache).length===0){
+      await loadPred();
+    }else{
+      liveFixes.forEach(function(fx){
+        var se=document.querySelector('[data-fid-score="'+fx.fixture_id+'"]'),
+            me=document.querySelector('[data-fid-min="'+fx.fixture_id+'"]');
+        if(se)se.textContent=fx.score_home+'-'+fx.score_away;
+        if(me)me.textContent=fx.minute+"'";
+        var cid=String(fx.fixture_id);
+        if(window._mlPickCache[cid]){
+          window._mlPickCache[cid].score_home=fx.score_home;
+          window._mlPickCache[cid].score_away=fx.score_away;
+          window._mlPickCache[cid].minute=fx.minute;
+        }
+      });
+    }
+    window._predSecsLeft=300;
+    _updatePredCd();
+  }catch(e){}
+}
+
+
 let ADV = null, EG = null;
 const FT = [
   ["1","1 (Casa)"], ["X","X (Pari)"], ["2","2 (Ospite)"],
