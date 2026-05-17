@@ -793,20 +793,24 @@ def _run_pred_refresh(get_adv_data, capital=1000.0, kelly=0.25, edge_min=0.03, s
     results.sort(key=lambda r: -(r['picks'][0]['edge_pct'] if r['picks'] else 0))
     _SERVER_PRED_CACHE['fixtures'] = results
     _SERVER_PRED_CACHE['last_update'] = int(time.time())
+    print('[bg_pred] refresh OK: %d fixtures' % len(results), flush=True)
 
 
 def _bg_pred_worker(get_adv_data):
     """Thread daemon: aggiorna la cache predizioni ogni 5 minuti, 24/7."""
+    import traceback
     try:
         _run_pred_refresh(get_adv_data)
     except Exception as e:
-        print('[bg_pred] first run error:', e)
+        print('[bg_pred] first run error:', e, flush=True)
+        traceback.print_exc()
     while True:
         time.sleep(300)
         try:
             _run_pred_refresh(get_adv_data)
         except Exception as e:
-            print('[bg_pred] worker error:', e)
+            print('[bg_pred] worker error:', e, flush=True)
+            traceback.print_exc()
 
 def register_picks_ui(app, get_adv_data):
     """Registra /api/ml-live-picks-all, /api/ml-accuracy-stats, /picks, /ml-accuracy."""
@@ -969,9 +973,19 @@ def register_picks_ui(app, get_adv_data):
         })
 
     # Avvia il thread background per aggiornamento predizioni ogni 5 minuti
+    @app.route('/api/pred-refresh-now')
+    def api_pred_refresh_now():
+        import traceback as _tb
+        try:
+            _run_pred_refresh(get_adv_data)
+            return jsonify({'ok': True, 'last_update': _SERVER_PRED_CACHE['last_update'], 'n': len(_SERVER_PRED_CACHE['fixtures'])})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e), 'trace': _tb.format_exc()}), 500
+
+
     _bg_t = threading.Thread(target=_bg_pred_worker, args=(get_adv_data,), daemon=True)
     _bg_t.start()
-    print('[bg_pred] Background prediction thread started.')
+    print('[bg_pred] Background prediction thread started.', flush=True)
 
 
 
