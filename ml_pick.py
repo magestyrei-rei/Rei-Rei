@@ -983,9 +983,18 @@ def register_picks_ui(app, get_adv_data):
             return jsonify({'ok': False, 'error': str(e), 'trace': _tb.format_exc()}), 500
 
 
-    _bg_t = threading.Thread(target=_bg_pred_worker, args=(get_adv_data,), daemon=True)
-    _bg_t.start()
-    print('[bg_pred] Background prediction thread started.', flush=True)
+    _bg_lock = threading.Lock()
+    _bg_started = [False]
+
+    @app.before_request
+    def _ensure_bg_pred_thread():
+        if not _bg_started[0]:
+            with _bg_lock:
+                if not _bg_started[0]:
+                    _bg_t = threading.Thread(target=_bg_pred_worker, args=(get_adv_data,), daemon=True)
+                    _bg_t.start()
+                    _bg_started[0] = True
+                    print('[bg_pred] Thread avviato nel worker al primo request.', flush=True)
 
 
 
