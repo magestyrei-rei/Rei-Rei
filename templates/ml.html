@@ -746,7 +746,7 @@ async function verifyPredictions(){
   }
   if(updated>0)localStorage.setItem('rr_pred_log',JSON.stringify(log));
   if(btn){btn.disabled=false;btn.innerHTML='&#x21BB; Verifica esiti';}
-  if(Array.isArray(fs))fs.forEach(function(f){window._mlPickCache[String(f.fixture_id)]=f;});window._predSecsLeft=300;
+  window._predSecsLeft=300;
     refreshPredHistory();
 }
 function downloadPredCSV(){
