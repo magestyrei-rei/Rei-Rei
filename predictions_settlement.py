@@ -394,6 +394,11 @@ def maybe_settle(min_interval_min=30, limit=20, max_age_days=7):
             return {'skipped': True, 'reason': 'too soon', 'elapsed_min': round(elapsed / 60, 1)}
         _SETTLE_STATE['last_run_ts'] = int(time.time())
         res = settle_batch(limit=limit, max_age_days=max_age_days)
+        # Settla anche pick ML orfani (non in odds_snapshots)
+        try:
+            settle_ml_picks_orphan(limit=30, max_age_days=14)
+        except Exception:
+            pass
         _SETTLE_STATE['last_settled'] = res.get('settled', 0)
         _SETTLE_STATE['last_seen'] = res.get('candidates', 0)
         if res.get('error'):
@@ -404,6 +409,41 @@ def maybe_settle(min_interval_min=30, limit=20, max_age_days=7):
     except Exception as e:
         _SETTLE_STATE['last_error'] = str(e)[:200]
         return {'error': str(e)[:200]}
+
+
+def settle_ml_picks_orphan(limit=50, max_age_days=14):
+    """Settla pick in ml_picks_log rimasti orfani (fixture_id non in odds_snapshots).
+    Chiama direttamente l'API per ogni fixture_id pendente.
+    """
+    try:
+        _ensure_picks_ddl()
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        rows = _turso_select_rows(
+            "SELECT DISTINCT fixture_id FROM ml_picks_log "
+            "WHERE result IS NULL AND logged_at >= ? LIMIT ?",
+            [cutoff, int(limit)]
+        )
+        if not rows:
+            return {'settled': 0, 'not_finished': 0, 'n': 0}
+        settled = 0
+        not_finished = 0
+        for row in rows:
+            fid = row.get('fixture_id')
+            if not fid:
+                continue
+            try:
+                rec, status = _fetch_fixture(fid)
+                if rec is None:
+                    not_finished += 1
+                    continue
+                _settle_picks(fid, rec.get('ft_home'), rec.get('ft_away'))
+                settled += 1
+            except Exception:
+                pass
+            time.sleep(0.3)
+        return {'settled': settled, 'not_finished': not_finished, 'n': len(rows)}
+    except Exception as e:
+        return {'error': str(e)[:300]}
 
 
 # ---------- routes ----------
@@ -433,6 +473,14 @@ def register(app):
         except Exception:
             max_age = 7
         res = settle_batch(limit=limit, max_age_days=max_age)
+        return jsonify(res)
+
+    @app.route('/api/settle-ml-picks-now')
+    def api_settle_ml_picks_now():
+        token = request.args.get('token', '')
+        if not INGEST_TOKEN or token != INGEST_TOKEN:
+            return jsonify({'error': 'forbidden'}), 403
+        res = settle_ml_picks_orphan(limit=100, max_age_days=30)
         return jsonify(res)
 
     @app.route('/api/ml-picks-accuracy')
