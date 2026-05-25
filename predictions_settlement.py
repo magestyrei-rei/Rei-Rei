@@ -2,15 +2,17 @@
 # delle partite per cui abbiamo loggato quote live in odds_snapshots.
 #
 # Flusso:
-#   1) trova fixture_id distinti in odds_snapshots non ancora settlati (ft_home IS NULL)
-#   2) per ognuno chiama API-Football /fixtures?id=N -> stato + score + teams
-#   3) se status in {FT, AET, PEN} -> chiama /fixtures/events?fixture=N -> minuto primo gol
-#   4) INSERT OR REPLACE INTO predictions_log
+# 1) trova fixture_id distinti in odds_snapshots non ancora settlati (ft_home IS NULL)
+# 2) per ognuno chiama API-Football /fixtures?id=N -> stato + score + teams
+# 3) se status in {FT, AET, PEN} -> chiama /fixtures/events?fixture=N -> minuto primo gol
+# 4) INSERT OR REPLACE INTO predictions_log
 #
 # Endpoints (registrati da register()):
-#   GET /api/predictions-log-ddl     -> DDL one-time (token)
-#   GET /api/predictions-settle      -> esegue settlement (token), param ?limit=N&max_age_days=D
-#   GET /api/predictions-log-stats   -> conteggi (open)
+#   GET /api/predictions-log-ddl        -> DDL one-time (token)
+#   GET /api/predictions-settle         -> esegue settlement (token), param ?limit=N&max_age_days=D
+#   GET /api/predictions-log-stats      -> conteggi (open)
+#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercato×campionato
+#   GET /api/ml-accuracy-trend          -> curva di apprendimento settimanale (param: ?market=&league=)
 #
 # Auto-trigger: maybe_settle() chiamato da odds_logger tick (best-effort, ogni 30 min).
 
@@ -21,8 +23,8 @@ import urllib.request
 import urllib.parse
 from flask import jsonify, request, current_app
 
-
 # ---------- config ----------
+
 def _normalize_turso_url(u):
     if not u:
         return ''
@@ -31,18 +33,17 @@ def _normalize_turso_url(u):
         u = 'https://' + u[len('libsql://'):]
     return u
 
-
-TURSO_URL = _normalize_turso_url(os.getenv('TURSO_URL', ''))
+TURSO_URL   = _normalize_turso_url(os.getenv('TURSO_URL', ''))
 TURSO_TOKEN = os.getenv('TURSO_TOKEN', '')
-INGEST_TOKEN = os.getenv('INGEST_TOKEN', '')
+INGEST_TOKEN  = os.getenv('INGEST_TOKEN', '')
 APISPORTS_KEY = os.getenv('APISPORTS_KEY', '')
 APISPORTS_HOST = 'v3.football.api-sports.io'
 
 # Stato in-memory per maybe_settle
 _SETTLE_STATE = {'last_run_ts': 0, 'last_settled': 0, 'last_seen': 0, 'last_error': None}
 
-
 # ---------- turso helpers (mirror of odds_logger style) ----------
+
 def _turso_arg(v):
     if v is None:
         return {'type': 'null', 'value': None}
@@ -54,36 +55,29 @@ def _turso_arg(v):
         return {'type': 'float', 'value': v}
     return {'type': 'text', 'value': str(v)}
 
-
 def _turso_value(v):
     if v is None or v.get('type') == 'null':
         return None
-    t = v.get('type')
+    t   = v.get('type')
     val = v.get('value')
     if t == 'integer':
-        try:
-            return int(val)
-        except Exception:
-            return val
+        try:    return int(val)
+        except: return val
     if t == 'float':
-        try:
-            return float(val)
-        except Exception:
-            return val
+        try:    return float(val)
+        except: return val
     return val
-
 
 def _turso_pipeline(reqs, timeout=60):
     if not TURSO_URL or not TURSO_TOKEN:
         raise RuntimeError('TURSO_URL / TURSO_TOKEN not configured')
     body = json.dumps({'requests': reqs}).encode('utf-8')
-    req = urllib.request.Request(TURSO_URL + '/v2/pipeline', data=body, method='POST', headers={
+    req  = urllib.request.Request(TURSO_URL + '/v2/pipeline', data=body, method='POST', headers={
         'Authorization': 'Bearer ' + TURSO_TOKEN,
-        'Content-Type': 'application/json',
+        'Content-Type':  'application/json',
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode('utf-8'))
-
 
 def _turso_execute(sql, args=None, timeout=60):
     stmt = {'sql': sql}
@@ -101,21 +95,20 @@ def _turso_execute(sql, args=None, timeout=60):
         raise RuntimeError('turso error: ' + str(first.get('error'))[:300])
     return first.get('response', {}).get('result', {})
 
-
 def _turso_select_rows(sql, args=None, timeout=60):
     result = _turso_execute(sql, args, timeout=timeout)
-    cols = [c.get('name') for c in result.get('cols', [])]
-    rows = []
+    cols   = [c.get('name') for c in result.get('cols', [])]
+    rows   = []
     for row_arr in result.get('rows', []):
         rows.append({cols[i]: _turso_value(v) for i, v in enumerate(row_arr)})
     return rows
 
-
 # ---------- API-Football helpers ----------
+
 def _af_get(path, params=None, timeout=20):
     if not APISPORTS_KEY:
         raise RuntimeError('APISPORTS_KEY not configured')
-    qs = ('?' + urllib.parse.urlencode(params)) if params else ''
+    qs  = ('?' + urllib.parse.urlencode(params)) if params else ''
     url = 'https://' + APISPORTS_HOST + path + qs
     req = urllib.request.Request(url, headers={
         'x-apisports-key': APISPORTS_KEY,
@@ -123,112 +116,111 @@ def _af_get(path, params=None, timeout=20):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode('utf-8'))
 
-
 def _fetch_fixture(fid):
     """Ritorna (settled_dict_or_None, raw_status). settled_dict ha tutti i campi necessari."""
     data = _af_get('/fixtures', params={'id': fid})
     resp = (data or {}).get('response') or []
     if not resp:
         return None, 'no_response'
-    f = resp[0]
+    f       = resp[0]
     fixture = f.get('fixture') or {}
-    league = f.get('league') or {}
-    teams = f.get('teams') or {}
-    goals = f.get('goals') or {}
-    score = f.get('score') or {}
-    status = (fixture.get('status') or {}).get('short') or ''
+    league  = f.get('league')  or {}
+    teams   = f.get('teams')   or {}
+    goals   = f.get('goals')   or {}
+    score   = f.get('score')   or {}
+    status  = (fixture.get('status') or {}).get('short') or ''
     if status not in ('FT', 'AET', 'PEN'):
         return None, status
     home = teams.get('home') or {}
     away = teams.get('away') or {}
-    ht = score.get('halftime') or {}
+    ht   = score.get('halftime') or {}
     return {
-        'fixture_id': fid,
-        'league_id': league.get('id'),
-        'league_name': league.get('name'),
-        'country': league.get('country'),
-        'season': league.get('season'),
-        'date_utc': fixture.get('date'),
-        'home_team_id': home.get('id'),
-        'home_team_name': home.get('name'),
-        'away_team_id': away.get('id'),
-        'away_team_name': away.get('name'),
-        'ft_home': goals.get('home'),
-        'ft_away': goals.get('away'),
-        'ht_home': ht.get('home'),
-        'ht_away': ht.get('away'),
-        'status': status,
+        'fixture_id':      fid,
+        'league_id':       league.get('id'),
+        'league_name':     league.get('name'),
+        'country':         league.get('country'),
+        'season':          league.get('season'),
+        'date_utc':        fixture.get('date'),
+        'home_team_id':    home.get('id'),
+        'home_team_name':  home.get('name'),
+        'away_team_id':    away.get('id'),
+        'away_team_name':  away.get('name'),
+        'ft_home':         goals.get('home'),
+        'ft_away':         goals.get('away'),
+        'ht_home':         ht.get('home'),
+        'ht_away':         ht.get('away'),
+        'status':          status,
     }, status
-
 
 def _fetch_first_goal(fid):
     """Ritorna (minute_int_or_None, team_id_or_None). None se 0-0 o errore."""
     try:
-        data = _af_get('/fixtures/events', params={'fixture': fid})
+        data   = _af_get('/fixtures/events', params={'fixture': fid})
         events = (data or {}).get('response') or []
-        goals = [e for e in events if (e.get('type') or '').lower() == 'goal']
+        goals  = [e for e in events if (e.get('type') or '').lower() == 'goal']
         if not goals:
             return None, None
         goals.sort(key=lambda e: ((e.get('time') or {}).get('elapsed') or 999,
-                                   (e.get('time') or {}).get('extra') or 0))
-        first = goals[0]
-        t = first.get('time') or {}
+                                   (e.get('time') or {}).get('extra')   or 0))
+        first   = goals[0]
+        t       = first.get('time') or {}
         elapsed = t.get('elapsed')
-        extra = t.get('extra') or 0
-        team = (first.get('team') or {}).get('id')
+        extra   = t.get('extra') or 0
+        team    = (first.get('team') or {}).get('id')
         if elapsed is None:
             return None, team
         return int(elapsed) + int(extra or 0), team
     except Exception:
         return None, None
 
-
 # ---------- DDL ----------
+
 DDL = """
 CREATE TABLE IF NOT EXISTS predictions_log (
-  fixture_id INTEGER PRIMARY KEY,
-  league_id INTEGER,
-  league_name TEXT,
-  country TEXT,
-  season INTEGER,
-  date_utc TEXT,
-  home_team_id INTEGER,
-  home_team_name TEXT,
-  away_team_id INTEGER,
-  away_team_name TEXT,
-  ft_home INTEGER,
-  ft_away INTEGER,
-  ht_home INTEGER,
-  ht_away INTEGER,
-  status TEXT,
-  first_goal_minute INTEGER,
-  first_goal_team_id INTEGER,
-  settled_ts INTEGER,
-  created_ts INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+  fixture_id          INTEGER PRIMARY KEY,
+  league_id           INTEGER,
+  league_name         TEXT,
+  country             TEXT,
+  season              INTEGER,
+  date_utc            TEXT,
+  home_team_id        INTEGER,
+  home_team_name      TEXT,
+  away_team_id        INTEGER,
+  away_team_name      TEXT,
+  ft_home             INTEGER,
+  ft_away             INTEGER,
+  ht_home             INTEGER,
+  ht_away             INTEGER,
+  status              TEXT,
+  first_goal_minute   INTEGER,
+  first_goal_team_id  INTEGER,
+  settled_ts          INTEGER,
+  created_ts          INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
 )
 """.strip()
 
-DDL_INDEX_LEAGUE = "CREATE INDEX IF NOT EXISTS idx_pl_league ON predictions_log(league_id)"
+DDL_INDEX_LEAGUE  = "CREATE INDEX IF NOT EXISTS idx_pl_league  ON predictions_log(league_id)"
 DDL_INDEX_SETTLED = "CREATE INDEX IF NOT EXISTS idx_pl_settled ON predictions_log(settled_ts)"
-DDL_INDEX_FGM = "CREATE INDEX IF NOT EXISTS idx_pl_fgm ON predictions_log(first_goal_minute)"
+DDL_INDEX_FGM     = "CREATE INDEX IF NOT EXISTS idx_pl_fgm     ON predictions_log(first_goal_minute)"
 
 # ---------- ml_picks_log: traccia i pick effettivi del modello ML ----------
+
 DDL_PICKS_LOG = """
 CREATE TABLE IF NOT EXISTS ml_picks_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  fixture_id INTEGER NOT NULL,
-  league_name TEXT,
-  home_team TEXT,
-  away_team TEXT,
-  market TEXT NOT NULL,
-  model_prob REAL,
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  fixture_id   INTEGER NOT NULL,
+  league_name  TEXT,
+  home_team    TEXT,
+  away_team    TEXT,
+  market       TEXT NOT NULL,
+  model_prob   REAL,
   bookie_quota REAL,
-  edge_pct REAL,
-  logged_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-  ft_home INTEGER,
-  ft_away INTEGER,
-  result TEXT,
-  settled_at INTEGER,
+  edge_pct     REAL,
+  logged_at    INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+  ft_home      INTEGER,
+  ft_away      INTEGER,
+  result       TEXT,
+  settled_at   INTEGER,
   UNIQUE(fixture_id, market)
 )
 """.strip()
@@ -265,11 +257,11 @@ def _settle_picks(fixture_id, ft_home, ft_away):
         if not picks:
             return
         total = ft_home + ft_away
-        btts = ft_home > 0 and ft_away > 0
-        now = int(time.time())
+        btts  = ft_home > 0 and ft_away > 0
+        now   = int(time.time())
         wins_map = {
-            'over_1_5': total > 1, 'over_2_5': total > 2, 'over_3_5': total > 3,
-            'under_1_5': total < 2, 'under_2_5': total < 3, 'under_3_5': total < 4,
+            'over_1_5':  total > 1,  'over_2_5':  total > 2,  'over_3_5':  total > 3,
+            'under_1_5': total < 2,  'under_2_5': total < 3,  'under_3_5': total < 4,
             'btts_si': btts, 'btts_no': not btts,
             '1': ft_home > ft_away, 'X': ft_home == ft_away, '2': ft_away > ft_home,
         }
@@ -285,15 +277,14 @@ def _settle_picks(fixture_id, ft_home, ft_away):
     except Exception:
         pass
 
-
 def _ensure_ddl():
     _turso_execute(DDL)
     _turso_execute(DDL_INDEX_LEAGUE)
     _turso_execute(DDL_INDEX_SETTLED)
     _turso_execute(DDL_INDEX_FGM)
 
-
 # ---------- core: settle ----------
+
 def _candidate_fixtures(limit=30, max_age_days=7):
     """Trova fixture_id presenti in odds_snapshots ma NON in predictions_log con ft_home valorizzato.
     Limita a partite recenti (max_age_days) per evitare match troppo vecchi.
@@ -307,7 +298,6 @@ def _candidate_fixtures(limit=30, max_age_days=7):
     )
     rows = _turso_select_rows(sql, [cutoff_ts, int(limit)])
     return [r['fixture_id'] for r in rows if r.get('fixture_id') is not None]
-
 
 def _upsert(rec):
     sql = (
@@ -332,7 +322,6 @@ def _upsert(rec):
     # Settle picks per questa fixture
     _settle_picks(rec['fixture_id'], rec.get('ft_home'), rec.get('ft_away'))
 
-
 def settle_batch(limit=30, max_age_days=7):
     """Esegue il settlement di un batch. Ritorna dict con stats."""
     started = time.time()
@@ -345,10 +334,10 @@ def settle_batch(limit=30, max_age_days=7):
     except Exception as e:
         return {'error': 'candidates: ' + str(e)[:200]}
 
-    settled = 0
+    settled      = 0
     not_finished = 0
-    errors = 0
-    skipped = []
+    errors       = 0
+    skipped      = []
     settled_list = []
 
     for fid in candidates:
@@ -359,28 +348,27 @@ def settle_batch(limit=30, max_age_days=7):
                 skipped.append({'fid': fid, 'status': status})
                 continue
             fgm, fgt = _fetch_first_goal(fid)
-            rec['first_goal_minute'] = fgm
+            rec['first_goal_minute']  = fgm
             rec['first_goal_team_id'] = fgt
             _upsert(rec)
             settled += 1
             settled_list.append({'fid': fid, 'score': '%s-%s' % (rec.get('ft_home'), rec.get('ft_away')),
-                                 'fgm': fgm, 'league': rec.get('league_name')})
+                                  'fgm': fgm, 'league': rec.get('league_name')})
         except Exception as e:
             errors += 1
             skipped.append({'fid': fid, 'err': str(e)[:120]})
 
     elapsed = round(time.time() - started, 2)
     return {
-        'ok': True,
-        'candidates': len(candidates),
-        'settled': settled,
+        'ok':           True,
+        'candidates':   len(candidates),
+        'settled':      settled,
         'not_finished': not_finished,
-        'errors': errors,
-        'elapsed_s': elapsed,
+        'errors':       errors,
+        'elapsed_s':    elapsed,
         'settled_list': settled_list[:20],
         'skipped_sample': skipped[:10],
     }
-
 
 def maybe_settle(min_interval_min=30, limit=20, max_age_days=7):
     """Auto-trigger best-effort dal tick di odds_logger.
@@ -400,7 +388,7 @@ def maybe_settle(min_interval_min=30, limit=20, max_age_days=7):
         except Exception:
             pass
         _SETTLE_STATE['last_settled'] = res.get('settled', 0)
-        _SETTLE_STATE['last_seen'] = res.get('candidates', 0)
+        _SETTLE_STATE['last_seen']    = res.get('candidates', 0)
         if res.get('error'):
             _SETTLE_STATE['last_error'] = res['error']
         else:
@@ -409,7 +397,6 @@ def maybe_settle(min_interval_min=30, limit=20, max_age_days=7):
     except Exception as e:
         _SETTLE_STATE['last_error'] = str(e)[:200]
         return {'error': str(e)[:200]}
-
 
 def settle_ml_picks_orphan(limit=50, max_age_days=14):
     """Settla pick in ml_picks_log rimasti orfani (fixture_id non in odds_snapshots).
@@ -425,7 +412,7 @@ def settle_ml_picks_orphan(limit=50, max_age_days=14):
         )
         if not rows:
             return {'settled': 0, 'not_finished': 0, 'n': 0}
-        settled = 0
+        settled      = 0
         not_finished = 0
         for row in rows:
             fid = row.get('fixture_id')
@@ -445,9 +432,10 @@ def settle_ml_picks_orphan(limit=50, max_age_days=14):
     except Exception as e:
         return {'error': str(e)[:300]}
 
-
 # ---------- routes ----------
+
 def register(app):
+
     @app.route('/api/predictions-log-ddl')
     def predictions_log_ddl():
         token = request.args.get('token', '')
@@ -464,14 +452,10 @@ def register(app):
         token = request.args.get('token', '')
         if not INGEST_TOKEN or token != INGEST_TOKEN:
             return jsonify({'error': 'forbidden'}), 403
-        try:
-            limit = int(request.args.get('limit', '30'))
-        except Exception:
-            limit = 30
-        try:
-            max_age = int(request.args.get('max_age_days', '7'))
-        except Exception:
-            max_age = 7
+        try:    limit   = int(request.args.get('limit', '30'))
+        except: limit   = 30
+        try:    max_age = int(request.args.get('max_age_days', '7'))
+        except: max_age = 7
         res = settle_batch(limit=limit, max_age_days=max_age)
         return jsonify(res)
 
@@ -485,33 +469,174 @@ def register(app):
 
     @app.route('/api/ml-picks-accuracy')
     def api_ml_picks_accuracy():
-        """Accuratezza pick ML reali (WIN/LOSS per mercato) da ml_picks_log."""
+        """
+        Accuratezza pick ML reali (WIN/LOSS) da ml_picks_log.
+        Ritorna:
+          by_market        - accuratezza globale per mercato
+          by_league        - accuratezza globale per campionato
+          by_market_league - accuratezza per coppia (mercato, campionato) [NUOVO]
+          recent           - ultimi 30 pick
+          pending          - pick non ancora settlati
+          total_logged     - totale pick loggati
+        """
         try:
             _ensure_picks_ddl()
+
+            # --- Accuratezza per mercato (globale) ---
             by_market = _turso_select_rows(
-                "SELECT market, COUNT(*) as total, "
-                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins "
-                "FROM ml_picks_log WHERE result IS NOT NULL GROUP BY market ORDER BY total DESC"
+                "SELECT market, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
+                "FROM ml_picks_log WHERE result IS NOT NULL "
+                "GROUP BY market ORDER BY total DESC"
             )
+
+            # --- Accuratezza per campionato (globale) ---
             by_league = _turso_select_rows(
-                "SELECT league_name, COUNT(*) as total, "
-                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins "
+                "SELECT league_name, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
                 "FROM ml_picks_log WHERE result IS NOT NULL AND league_name IS NOT NULL "
                 "GROUP BY league_name ORDER BY total DESC LIMIT 20"
             )
+
+            # --- [NUOVO] Accuratezza per mercato × campionato ---
+            # Solo coppie con almeno 3 predizioni (per evitare rumore statistico)
+            by_market_league = _turso_select_rows(
+                "SELECT league_name, market, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
+                "FROM ml_picks_log "
+                "WHERE result IS NOT NULL AND league_name IS NOT NULL "
+                "GROUP BY league_name, market "
+                "HAVING COUNT(*) >= 3 "
+                "ORDER BY accuracy_pct DESC, total DESC "
+                "LIMIT 200"
+            )
+
+            # --- Ultimi 30 pick (con risultato) ---
             recent = _turso_select_rows(
                 "SELECT fixture_id, league_name, home_team, away_team, market, "
                 "model_prob, edge_pct, result, ft_home, ft_away, logged_at "
                 "FROM ml_picks_log ORDER BY logged_at DESC LIMIT 30"
             )
+
             pending_r = _turso_select_rows("SELECT COUNT(*) as n FROM ml_picks_log WHERE result IS NULL")
-            total_r = _turso_select_rows("SELECT COUNT(*) as n FROM ml_picks_log")
+            total_r   = _turso_select_rows("SELECT COUNT(*) as n FROM ml_picks_log")
+
             return jsonify({
-                'by_market': by_market or [],
-                'by_league': by_league or [],
-                'recent': recent or [],
-                'pending': (pending_r or [{}])[0].get('n', 0),
-                'total_logged': (total_r or [{}])[0].get('n', 0),
+                'by_market':        by_market        or [],
+                'by_league':        by_league        or [],
+                'by_market_league': by_market_league or [],   # <-- NUOVO
+                'recent':           recent           or [],
+                'pending':          (pending_r or [{}])[0].get('n', 0),
+                'total_logged':     (total_r   or [{}])[0].get('n', 0),
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/ml-accuracy-trend')
+    def api_ml_accuracy_trend():
+        """
+        [NUOVO] Curva di apprendimento ML: accuratezza per settimana.
+
+        Parametri opzionali:
+          ?market=over_2_5      -> filtra per mercato specifico
+          ?league=Bundesliga    -> filtra per campionato
+          ?mode=cumulative      -> accuratezza cumulativa (default: settimanale)
+
+        Risposta:
+          trend    - lista [{week, total, wins, accuracy_pct, cumulative_total, cumulative_accuracy_pct}]
+          by_market_weekly - lista [{week, market, total, wins, accuracy_pct}] (solo se no filtro mercato)
+          market   - mercato filtrato ('all' se nessuno)
+          league   - campionato filtrato ('all' se nessuno)
+        """
+        try:
+            _ensure_picks_ddl()
+            market = request.args.get('market', '').strip()
+            league = request.args.get('league', '').strip()
+
+            # Costruisce WHERE clause dinamicamente
+            where_parts = ["result IS NOT NULL"]
+            args = []
+            if market:
+                where_parts.append("market = ?")
+                args.append(market)
+            if league:
+                where_parts.append("league_name = ?")
+                args.append(league)
+            where = " AND ".join(where_parts)
+
+            # --- Trend settimanale (per mercato se filtrato, altrimenti globale) ---
+            trend_rows = _turso_select_rows(
+                "SELECT strftime('%Y-%W', datetime(logged_at, 'unixepoch')) as week, "
+                "COUNT(*) as total, "
+                "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
+                "FROM ml_picks_log WHERE " + where +
+                " GROUP BY week ORDER BY week ASC",
+                args if args else None
+            )
+
+            # Aggiunge accuratezza cumulativa (rolling) a ogni settimana
+            cum_total = 0
+            cum_wins  = 0
+            for row in trend_rows:
+                cum_total += row.get('total', 0) or 0
+                cum_wins  += row.get('wins', 0)  or 0
+                row['cumulative_total']        = cum_total
+                row['cumulative_wins']         = cum_wins
+                row['cumulative_accuracy_pct'] = round(100.0 * cum_wins / cum_total, 1) if cum_total else None
+
+            # --- Trend per singolo mercato (solo se non filtrato) ---
+            by_market_weekly = []
+            if not market:
+                bm_where_parts = ["result IS NOT NULL"]
+                bm_args = []
+                if league:
+                    bm_where_parts.append("league_name = ?")
+                    bm_args.append(league)
+                bm_where = " AND ".join(bm_where_parts)
+                by_market_weekly = _turso_select_rows(
+                    "SELECT strftime('%Y-%W', datetime(logged_at, 'unixepoch')) as week, "
+                    "market, "
+                    "COUNT(*) as total, "
+                    "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                    "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
+                    "FROM ml_picks_log WHERE " + bm_where +
+                    " GROUP BY week, market ORDER BY week ASC, market",
+                    bm_args if bm_args else None
+                )
+
+            # --- Riepilogo per campionato (solo se non filtrato per campionato) ---
+            league_summary = []
+            if not league:
+                lg_where_parts = ["result IS NOT NULL", "league_name IS NOT NULL"]
+                lg_args = []
+                if market:
+                    lg_where_parts.append("market = ?")
+                    lg_args.append(market)
+                lg_where = " AND ".join(lg_where_parts)
+                league_summary = _turso_select_rows(
+                    "SELECT league_name, "
+                    "COUNT(*) as total, "
+                    "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
+                    "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
+                    "FROM ml_picks_log WHERE " + lg_where +
+                    " GROUP BY league_name HAVING COUNT(*) >= 3 ORDER BY total DESC LIMIT 30",
+                    lg_args if lg_args else None
+                )
+
+            return jsonify({
+                'trend':             trend_rows       or [],
+                'by_market_weekly':  by_market_weekly or [],
+                'league_summary':    league_summary   or [],
+                'market':            market or 'all',
+                'league':            league or 'all',
+                'weeks_tracked':     len(trend_rows),
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
@@ -521,7 +646,7 @@ def register(app):
         """Ultimi N match con primo gol entro 16' (Early Goal feed), filtrati per campionato."""
         try:
             _ensure_ddl()
-            limit = min(int(request.args.get('limit', 30)), 100)
+            limit  = min(int(request.args.get('limit', 30)), 100)
             league = request.args.get('league', '').strip()
             if league:
                 rows = _turso_select_rows(
@@ -550,8 +675,8 @@ def register(app):
     def predictions_log_stats():
         try:
             _ensure_ddl()
-            tot = _turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log")
-            settled = _turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log WHERE ft_home IS NOT NULL")
+            tot      = _turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log")
+            settled  = _turso_select_rows("SELECT COUNT(*) AS n FROM predictions_log WHERE ft_home IS NOT NULL")
             filtered = _turso_select_rows(
                 "SELECT COUNT(*) AS n FROM predictions_log "
                 "WHERE ft_home IS NOT NULL AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16"
@@ -567,13 +692,13 @@ def register(app):
                 "ORDER BY settled_ts DESC LIMIT 10"
             )
             return jsonify({
-                'ok': True,
-                'total': (tot or [{}])[0].get('n', 0),
-                'settled': (settled or [{}])[0].get('n', 0),
-                'first_goal_le16': (filtered or [{}])[0].get('n', 0),
-                'by_league_top20': by_league,
-                'recent': recent,
-                'auto_state': _SETTLE_STATE,
+                'ok':               True,
+                'total':            (tot      or [{}])[0].get('n', 0),
+                'settled':          (settled  or [{}])[0].get('n', 0),
+                'first_goal_le16':  (filtered or [{}])[0].get('n', 0),
+                'by_league_top20':  by_league,
+                'recent':           recent,
+                'auto_state':       _SETTLE_STATE,
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
