@@ -518,28 +518,19 @@ def register(app):
 
     @app.route('/api/recent-matches')
     def api_recent_matches():
-        """Ultimi N match settlati per campionato (per la sezione Early Goal)."""
+        """Ultimi N match con primo gol entro 16' (Early Goal feed)."""
         try:
             _ensure_ddl()
-            league = request.args.get('league', '')
             limit = min(int(request.args.get('limit', 30)), 100)
-            if league:
-                rows = _turso_select_rows(
-                    "SELECT fixture_id, league_name, home_team_name, away_team_name, "
-                    "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
-                    "FROM predictions_log WHERE ft_home IS NOT NULL AND league_name = ? "
-                    "ORDER BY settled_ts DESC LIMIT ?",
-                    [league, limit]
-                )
-            else:
-                rows = _turso_select_rows(
-                    "SELECT fixture_id, league_name, home_team_name, away_team_name, "
-                    "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
-                    "FROM predictions_log WHERE ft_home IS NOT NULL "
-                    "ORDER BY settled_ts DESC LIMIT ?",
-                    [limit]
-                )
-            return jsonify({'matches': rows or [], 'league': league, 'n': len(rows or [])})
+            rows = _turso_select_rows(
+                "SELECT fixture_id, league_name, home_team_name, away_team_name, "
+                "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
+                "FROM predictions_log WHERE ft_home IS NOT NULL "
+                "AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
+                "ORDER BY settled_ts DESC LIMIT ?",
+                [limit]
+            )
+            return jsonify({'matches': rows or [], 'n': len(rows or [])})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
