@@ -810,7 +810,7 @@ async function loadRecentMatches(){
     });
     var eg16=ms.filter(function(m){return m.first_goal_minute!=null&&m.first_goal_minute<=16;}).length;
     h+='</tbody></table></div>';
-    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite · Gol ≤16': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite · Gol ≤16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
 }
