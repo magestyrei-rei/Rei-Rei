@@ -783,6 +783,7 @@ async function loadRecentMatches(){
   el.innerHTML='<div style="color:#94a3b8;padding:10px">Caricamento...</div>';
   try{
     var league=document.getElementById('e-league').value;
+      if(league.includes(' - '))league=league.split(' - ').slice(1).join(' - ');
       var r=await fetch('/api/recent-matches?league='+encodeURIComponent(league)+'&limit=30',{cache:'no-store'});
     var d=await r.json();
     if(d.error){el.innerHTML='<div style="color:#ef4444">Errore: '+d.error+'</div>';return;}
