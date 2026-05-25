@@ -128,6 +128,10 @@
       <h3>Probabilita FT (condizionate a early-goal + 1T)</h3>
       <div class="cards" id="e-cards"></div>
     </div>
+    <div style="margin-top:14px">
+      <button onclick="toggleRecentMatches()" id="eg-recent-btn" style="padding:7px 16px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x1F4CB; Ultime 30 partite del campionato</button>
+      <div id="eg-recent-table" style="display:none;margin-top:10px"></div>
+    </div>
   </section>
 
   <section class="view" id="view-picks">
@@ -410,6 +414,7 @@ function eUpdate(){
   const node = (byPgHt[$("e-pg").value] || {})[$("e-ht").value];
   $("e-meta").innerHTML = 'Campionato: <b>'+$("e-league").value+'</b> (n='+(lg.n||0)+') - Chi segna prima: <b>'+$("e-pg").value+'</b> - 1T: <b>'+($("e-ht").value||"-")+'</b> - campione: <b>'+(node ? node.n : 0)+'</b>';
   renderCards($("e-cards"), FT, node);
+  if(typeof _egRecentOpen!=='undefined'&&_egRecentOpen)loadRecentMatches();
 }
 function loadEG(){
   fetch("/api/ml-data").then(function(r){ return r.json(); }).then(function(j){
@@ -763,6 +768,52 @@ function downloadPredCSV(){
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
 function clearPredHistory(){if(!confirm('Svuotare lo storico? Questa azione non si annulla.'))return;localStorage.removeItem('rr_pred_log');refreshPredHistory();}
+
+// ── Ultime 30 partite Early Goal ──
+var _egRecentOpen=false;
+function toggleRecentMatches(){
+  var el=document.getElementById('eg-recent-table'),btn=document.getElementById('eg-recent-btn');
+  _egRecentOpen=!_egRecentOpen;
+  if(_egRecentOpen){el.style.display='block';loadRecentMatches();btn.innerHTML='&#x25B2; Nascondi partite';}
+  else{el.style.display='none';btn.innerHTML='&#x1F4CB; Ultime 30 partite del campionato';}
+}
+async function loadRecentMatches(){
+  var league=document.getElementById('e-league').value;
+  var el=document.getElementById('eg-recent-table');
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Caricamento...</div>';
+  try{
+    var r=await fetch('/api/recent-matches?league='+encodeURIComponent(league)+'&limit=30',{cache:'no-store'});
+    var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#ef4444">Errore: '+d.error+'</div>';return;}
+    var ms=d.matches||[];
+    if(!ms.length){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuna partita trovata per questo campionato.</div>';return;}
+    var fmt=function(ts){return ts?new Date(ts*1000).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):'-';};
+    var fgm=function(v){if(v==null)return '<span style="color:#475569">—</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">⚡'+v+"'</span>":v+"'";};
+    var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
+    h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Data</th>';
+    h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Partita</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1T</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">FT</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1° Gol</th>';
+    h+='</tr></thead><tbody>';
+    ms.forEach(function(m,i){
+      var bg=i%2===0?'':'background:#0f172a;';
+      var ft=m.ft_home+'-'+m.ft_away;
+      var ht=m.ht_home!=null?m.ht_home+'-'+m.ht_away:'?';
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
+      h+='<td style="padding:5px 10px;color:#94a3b8;white-space:nowrap">'+fmt(m.settled_ts)+'</td>';
+      h+='<td style="padding:5px 10px;font-weight:500">'+m.home_team_name+' <span style="color:#475569">vs</span> '+m.away_team_name+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+ht+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center;font-weight:600;color:#f0883e">'+ft+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_minute)+'</td>';
+      h+='</tr>';
+    });
+    var eg16=ms.filter(function(m){return m.first_goal_minute!=null&&m.first_goal_minute<=16;}).length;
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite · Gol ≤16': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
+}
 
 </script>
 </body>
