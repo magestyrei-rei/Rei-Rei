@@ -556,7 +556,7 @@ var _trLeaguesLoaded = false;
       if (!league && !market && leagueEl && leagueEl.options.length === 1 && data.league_summary) {
         data.league_summary.forEach(r => {
           const o = document.createElement('option');
-          o.value = r.league_name; o.textContent = r.league_name; leagueEl.appendChild(o);
+          o.value = r.league_name; o.textContent = (r.country ? r.country + ' – ' : '') + r.league_name; leagueEl.appendChild(o);
         });
       }
       _drawTrendChart(data.trend || []);
@@ -612,7 +612,7 @@ var _trLeaguesLoaded = false;
         const pct = r.accuracy_pct || 0;
         const col = pct >= 55 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
         return '<div class="league-card" style="border-left:4px solid ' + col + '">' +
-          '<div class="lc-name">' + r.league_name + '</div>' +
+          '<div class="lc-name">' + (r.country ? '<span style="color:#9ca3af;font-size:.7rem">' + r.country + '</span><br>' : '') + r.league_name + '</div>' +
           '<div class="lc-pct" style="color:' + col + '">' + pct + '%</div>' +
           '<div class="lc-sub">' + r.wins + '/' + r.total + ' predizioni</div>' +
           '</div>';
@@ -635,7 +635,7 @@ var _trLeaguesLoaded = false;
       filtered.map(r => {
         const pct = r.accuracy_pct || 0;
         const col = pct >= 55 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
-        return '<tr><td>' + r.league_name + '</td>' +
+        return '<tr><td>' + (r.country ? '<span style="color:#9ca3af;font-size:.75rem">' + r.country + '</span><br>' : '') + r.league_name + '</td>' +
           '<td><span class="mkt-badge">' + (mkL[r.market] || r.market) + '</span></td>' +
           '<td>' + r.total + '</td><td>' + r.wins + '</td>' +
           '<td style="color:' + col + ';font-weight:700">' + pct + '%</td>' +
