@@ -595,6 +595,7 @@ var _trLeaguesLoaded = false;
           grid: { color: 'rgba(0,0,0,0.05)' } } }
       }
     });
+    setTimeout(function(){ if(window._trendChart) window._trendChart.resize(); }, 80);
   }
   function _renderLeagueCards(summary) {
     const el = document.getElementById('trend-league-cards');
