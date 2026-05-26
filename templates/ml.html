@@ -37,6 +37,22 @@
   .empty{color:#64748b;font-style:italic;padding:20px;text-align:center}
   .notes{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;margin-top:18px;font-size:12px;color:#94a3b8;line-height:1.5}
   .notes b{color:#e2e8f0}
+.trend-filters{display:flex;gap:1rem;align-items:flex-end;margin-bottom:1.5rem;flex-wrap:wrap}
+.filter-group{display:flex;flex-direction:column;gap:4px}
+.filter-group label{font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase}
+.filter-group select{padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.875rem;background:#fff}
+.trend-chart-wrap{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;margin-bottom:1.5rem}
+.league-card{background:#fff;border-radius:10px;padding:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.lc-name{font-size:.8rem;font-weight:600;color:#374151;margin-bottom:4px}
+.lc-pct{font-size:1.5rem;font-weight:700}
+.lc-sub{font-size:.75rem;color:#9ca3af}
+.table-wrap{overflow-x:auto}
+.acc-table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.acc-table th{background:#f9fafb;padding:10px 14px;text-align:left;font-size:.8rem;font-weight:600;color:#6b7280;text-transform:uppercase;border-bottom:1px solid #e5e7eb}
+.acc-table td{padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:.875rem}
+.acc-table tr:last-child td{border-bottom:none}
+.mkt-badge{background:#eff6ff;color:#3b82f6;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:600}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
@@ -55,9 +71,9 @@
     <div class="tab" data-view="eg">Early-goal (legacy)</div>
     <div class="tab" data-view="picks">Pick Live</div>
     <div class="tab" data-view="acc">ML Accuracy</div>
-    <div class="tab" data-view="trend">📈 Trend ML</div>
+    <div class="tab" data-view="trend">ð Trend ML</div>
     <div class="tab" data-view="how">Come funziona</div>
-     <div class="tab" data-view="pred">🔮 Live Predizioni</div>
+     <div class="tab" data-view="pred">ð® Live Predizioni</div>
   </div>
 
   <section class="view active" id="view-live">
@@ -129,7 +145,7 @@
       <div class="cards" id="e-cards"></div>
     </div>
     <div style="margin-top:14px">
-      <button onclick="toggleRecentMatches()" id="eg-recent-btn" style="padding:7px 16px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x26A1; Ultime 30 early goal (≤16')</button>
+      <button onclick="toggleRecentMatches()" id="eg-recent-btn" style="padding:7px 16px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x26A1; Ultime 30 early goal (â¤16')</button>
       <div id="eg-recent-table" style="display:none;margin-top:10px"></div>
     </div>
   </section>
@@ -155,101 +171,89 @@
   </section>
 
   <section class="view" id="view-trend">
-  <!-- KPI bar -->
-  <div id="tr-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
-
-  <!-- Controls -->
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-    <select id="tr-league" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:14px"></select>
-    <select id="tr-chart-type" style="padding:6px 10px;border-radius:6px;border:1px solid #ddd;font-size:13px">
-      <option value="season">Per stagione</option>
-      <option value="rolling">Rolling (ultimi 10)</option>
-    </select>
-    <button onclick="loadTrend()" style="padding:6px 18px;border-radius:6px;background:#1d4ed8;color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600">↻ Aggiorna</button>
+  <h2>📈 Curva di Apprendimento ML</h2>
+  <div class="trend-filters">
+    <div class="filter-group"><label>Campionato</label>
+      <select id="trend-league-sel" onchange="loadTrend()">
+        <option value="">Tutti i campionati</option>
+      </select></div>
+    <div class="filter-group"><label>Mercato</label>
+      <select id="trend-market-sel" onchange="loadTrend()">
+        <option value="">Tutti i mercati</option>
+        <option value="over_1_5">Over 1.5</option>
+        <option value="over_2_5">Over 2.5</option>
+        <option value="over_3_5">Over 3.5</option>
+        <option value="btts_si">BTTS Sì</option>
+        <option value="btts_no">BTTS No</option>
+        <option value="1">1 Casa</option>
+        <option value="X">X Pareggio</option>
+        <option value="2">2 Ospite</option>
+      </select></div>
+    <button onclick="loadTrend()">↻ Aggiorna</button>
   </div>
-  <div id="tr-meta" style="font-size:13px;color:#6b7280;margin-bottom:12px;min-height:18px"></div>
-
-  <!-- Chart -->
-  <div style="position:relative;height:300px;margin-bottom:20px">
-    <canvas id="tr-chart"></canvas>
-  </div>
-
-  <!-- Table -->
-  <div id="tr-table" style="overflow-x:auto"></div>
-
-  <div id="tr-picks-accuracy" style="margin-top:16px;background:#161b22;border-radius:8px;padding:12px;border:1px solid #30363d">
-    <p style="color:#8b949e;font-size:13px;margin:0">Caricamento accuratezza pick ML...</p>
-  </div>
-<div id="tr-pred-history" style="margin-top:20px;background:#1e293b;border-radius:8px;padding:14px;border:1px solid #334155">
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-<h3 style="margin:0;color:#f1f5f9;font-size:14px;flex:1">&#x1F4CB; Storico Predizioni ML</h3>
-<button onclick="verifyPredictions()" style="padding:5px 12px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:5px;font-size:12px;cursor:pointer">&#x21BB; Verifica esiti</button>
-<button onclick="downloadPredCSV()" style="padding:5px 12px;background:#14532d;color:#86efac;border:1px solid #16a34a;border-radius:5px;font-size:12px;cursor:pointer">&#x2B07; CSV</button>
-<button onclick="clearPredHistory()" style="padding:5px 12px;background:#3b0f0f;color:#fca5a5;border:1px solid #7f1d1d;border-radius:5px;font-size:12px;cursor:pointer">&#x1F5D1; Svuota</button>
-</div>
-<div id="tr-pred-table" style="font-size:12px;color:#64748b">Nessuna predizione. Apri &#x1F52E; Live Predizioni per salvare automaticamente.</div>
-</div>
+  <div class="trend-chart-wrap"><canvas id="trend-chart" height="100"></canvas></div>
+  <div id="trend-league-cards" class="league-cards"></div>
+  <div id="trend-mkt-league-wrap"></div>
 </section>
-
 <section class="view" id="view-how">
     <div class="notes" style="line-height:1.7;font-size:13px">
       <h2 style="margin:0 0 14px;color:#f1f5f9;font-size:18px">Come funziona il ML Predictor</h2>
       <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Live (minuto + score)"</h3>
-      <p>Modello <b>Poisson</b> calibrato su <b>~9.000 partite reali 2010-2024</b>. Per ogni combinazione (campionato, minuto-snapshot, score-attuale) ti dice la probabilità per:</p>
+      <p>Modello <b>Poisson</b> calibrato su <b>~9.000 partite reali 2010-2024</b>. Per ogni combinazione (campionato, minuto-snapshot, score-attuale) ti dice la probabilitÃ  per:</p>
       <ul>
         <li><b>1X2 finale</b> (Casa / Pareggio / Ospite)</li>
         <li><b>OVER/UNDER</b> 1.5, 2.5, 3.5 gol totali</li>
-        <li><b>BTTS</b> (Both Teams To Score) Sì/No</li>
-        <li><b>Stessi mercati per il 2° tempo</b> (dal minuto attuale al 90)</li>
-        <li><b>Probabilità di chi segna nel 2T</b> (Casa / Ospite / Nessuno)</li>
+        <li><b>BTTS</b> (Both Teams To Score) SÃ¬/No</li>
+        <li><b>Stessi mercati per il 2Â° tempo</b> (dal minuto attuale al 90)</li>
+        <li><b>ProbabilitÃ  di chi segna nel 2T</b> (Casa / Ospite / Nessuno)</li>
       </ul>
-      <p>Per ogni mercato vedi la <b>quota equa</b> = 1 / probabilità. Se il bookmaker offre una quota più alta della quota equa, hai un <b>edge positivo</b>.</p>
+      <p>Per ogni mercato vedi la <b>quota equa</b> = 1 / probabilitÃ . Se il bookmaker offre una quota piÃ¹ alta della quota equa, hai un <b>edge positivo</b>.</p>
 
       <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Pick Live"</h3>
       <p>Pesca le partite <b>in corso adesso</b>, applica il modello Poisson, confronta con le quote del bookmaker (raccolte via API-Football <code>/odds/live</code> ogni 30 min). Per ogni mercato calcola:</p>
       <ul>
-        <li><b>Edge</b> = (probabilità modello × quota bookie) − 1</li>
-        <li><b>Stake Kelly</b> = (b·p − q) / b dove b = quota−1, p = probabilità, q = 1−p</li>
-        <li><b>Stake EUR</b> = capitale × stake_pct (con cap di stake_max)</li>
+        <li><b>Edge</b> = (probabilitÃ  modello Ã quota bookie) â 1</li>
+        <li><b>Stake Kelly</b> = (bÂ·p â q) / b dove b = quotaâ1, p = probabilitÃ , q = 1âp</li>
+        <li><b>Stake EUR</b> = capitale Ã stake_pct (con cap di stake_max)</li>
       </ul>
       <p>I parametri configurabili: capitale, frazione Kelly (0.25 = quarto-Kelly = conservativo), edge minimo, stake max %.</p>
 
       <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "ML Accuracy"</h3>
-      <p>Statistiche del modello: fixture settlate, distribuzione per lega, snapshot quote linkati. Quando avremo ≥50 fixture settlate con quote loggate appariranno anche <b>Brier score</b>, <b>Log loss</b> e <b>ROI</b> dei pick storici.</p>
+      <p>Statistiche del modello: fixture settlate, distribuzione per lega, snapshot quote linkati. Quando avremo â¥50 fixture settlate con quote loggate appariranno anche <b>Brier score</b>, <b>Log loss</b> e <b>ROI</b> dei pick storici.</p>
 
-      <h2 style="margin:24px 0 10px;color:#f1f5f9;font-size:16px">Come usarlo al meglio — regole pratiche</h2>
+      <h2 style="margin:24px 0 10px;color:#f1f5f9;font-size:16px">Come usarlo al meglio â regole pratiche</h2>
 
-      <h3 style="margin:12px 0 6px;color:#3fb950;font-size:14px">✅ DA FARE</h3>
+      <h3 style="margin:12px 0 6px;color:#3fb950;font-size:14px">â DA FARE</h3>
       <ul>
-        <li><b>Investi solo con edge ≥ 3%</b> (default). Sotto soglia non scommettere.</li>
+        <li><b>Investi solo con edge â¥ 3%</b> (default). Sotto soglia non scommettere.</li>
         <li><b>Usa stake Kelly frazionato (0.25)</b>, mai Kelly pieno (1.0). Riduci la varianza del bankroll.</li>
-        <li><b>Cap stake al 5% del capitale</b> per pick. Mai esporre più di un ventesimo del bankroll su una singola partita.</li>
-        <li><b>Probabilità ≥ 65%</b> = pick affidabile (insieme a edge positivo).</li>
-        <li><b>n_eff ≥ 30</b> nel bucket (lega/minuto/score): meno è "rumoroso".</li>
+        <li><b>Cap stake al 5% del capitale</b> per pick. Mai esporre piÃ¹ di un ventesimo del bankroll su una singola partita.</li>
+        <li><b>ProbabilitÃ  â¥ 65%</b> = pick affidabile (insieme a edge positivo).</li>
+        <li><b>n_eff â¥ 30</b> nel bucket (lega/minuto/score): meno Ã¨ "rumoroso".</li>
         <li><b>Filtra per lega</b>: top-tier (Premier League, Serie A, La Liga, Bundesliga, Ligue 1) hanno la copertura migliore di quote live.</li>
       </ul>
 
-      <h3 style="margin:12px 0 6px;color:#f85149;font-size:14px">❌ DA NON FARE</h3>
+      <h3 style="margin:12px 0 6px;color:#f85149;font-size:14px">â DA NON FARE</h3>
       <ul>
-        <li><b>Non puntare su edge negativo</b>. Se la quota bookmaker è più bassa della tua quota equa, il bookie pensa che la prob reale sia più bassa della tua. Spesso ha ragione.</li>
-        <li><b>Non puntare con probabilità < 50%</b> anche se l'edge è alto. Pick "underdog" hanno alta varianza.</li>
-        <li><b>Non rincorrere le perdite</b> (martingala). Il Kelly è già la strategia ottima di gestione bankroll.</li>
-        <li><b>Non puntare su leghe poco coperte</b> (lower divisions, friendlies). Il modello può essere meno calibrato.</li>
+        <li><b>Non puntare su edge negativo</b>. Se la quota bookmaker Ã¨ piÃ¹ bassa della tua quota equa, il bookie pensa che la prob reale sia piÃ¹ bassa della tua. Spesso ha ragione.</li>
+        <li><b>Non puntare con probabilitÃ  < 50%</b> anche se l'edge Ã¨ alto. Pick "underdog" hanno alta varianza.</li>
+        <li><b>Non rincorrere le perdite</b> (martingala). Il Kelly Ã¨ giÃ  la strategia ottima di gestione bankroll.</li>
+        <li><b>Non puntare su leghe poco coperte</b> (lower divisions, friendlies). Il modello puÃ² essere meno calibrato.</li>
         <li><b>Non puntare se n_eff < 10</b>. Bucket troppo piccolo = stima inaffidabile.</li>
       </ul>
 
       <h2 style="margin:24px 0 10px;color:#f1f5f9;font-size:16px">Esempio pratico</h2>
       <p>Partita Roma vs Milan, 60', score attuale 0-1. Selezioni il bucket nel tab "Live":</p>
       <ul>
-        <li><b>Probabilità BTTS Si = 72%</b> (n_bucket = 245 sample storici)</li>
+        <li><b>ProbabilitÃ  BTTS Si = 72%</b> (n_bucket = 245 sample storici)</li>
         <li><b>Quota equa = 1 / 0.72 = 1.39</b></li>
         <li>Bet365 offre quota 1.65 su BTTS</li>
-        <li><b>Edge = 0.72 × 1.65 − 1 = +18.8%</b> — molto alto, soglia 3% superata</li>
-        <li><b>Kelly stake</b> = (0.65·0.72 − 0.28) / 0.65 = 28.8% del bankroll</li>
-        <li>Con kelly_mult=0.25 → 7.2% → cap a 5% → <b>50 EUR su 1000 EUR</b></li>
+        <li><b>Edge = 0.72 Ã 1.65 â 1 = +18.8%</b> â molto alto, soglia 3% superata</li>
+        <li><b>Kelly stake</b> = (0.65Â·0.72 â 0.28) / 0.65 = 28.8% del bankroll</li>
+        <li>Con kelly_mult=0.25 â 7.2% â cap a 5% â <b>50 EUR su 1000 EUR</b></li>
       </ul>
 
-      <p style="background:#3a2a0a;border-left:3px solid #fde68a;padding:12px;margin-top:20px;color:#fde68a;border-radius:4px"><b>Disclaimer:</b> il modello è uno strumento statistico. Anche con edge positivo, ogni singola pick può perdere. Il valore atteso positivo si manifesta su <b>centinaia/migliaia</b> di scommesse, non su poche. Gioca solo somme che puoi permetterti di perdere.</p>
+      <p style="background:#3a2a0a;border-left:3px solid #fde68a;padding:12px;margin-top:20px;color:#fde68a;border-radius:4px"><b>Disclaimer:</b> il modello Ã¨ uno strumento statistico. Anche con edge positivo, ogni singola pick puÃ² perdere. Il valore atteso positivo si manifesta su <b>centinaia/migliaia</b> di scommesse, non su poche. Gioca solo somme che puoi permetterti di perdere.</p>
     </div>
   </section>
    <section class="view" id="view-pred">
@@ -279,7 +283,7 @@ function _updatePredCd(){
   if(!cd)return;
   var m=String(Math.floor(window._predSecsLeft/60)).padStart(2,'0'),
       s=String(window._predSecsLeft%60).padStart(2,'0');
-  cd.textContent='⏱ '+m+':'+s;
+  cd.textContent='â± '+m+':'+s;
 }
 function startPredAutoRefresh(){
   stopPredAutoRefresh();
@@ -529,132 +533,112 @@ function kpiCard(label, value) {
     if (el) new MutationObserver(() => _updateDlBtn(id[0])).observe(el, {childList: true});
   });
 
-// ── Trend ML: monitoraggio predizioni per campionato ──
+// ââ Trend ML: monitoraggio predizioni per campionato ââ
 var _trChart = null;
 var _trLeaguesLoaded = false;
-function loadTrend() {
-  var trSel = document.getElementById('tr-league');
-  if (!_trLeaguesLoaded) {
-    _trLeaguesLoaded = true;
-    fetch('/api/ml-picks-leagues').then(function(r){return r.json();}).then(function(d){
-      trSel.innerHTML = '<option value="">— Tutti i campionati —</option>';
-      (d.leagues||[]).forEach(function(l){
-        var o = document.createElement('option');
-        o.value = l.name; o.text = l.name + ' (' + l.n + ')';
-        trSel.appendChild(o);
-      });
-      loadTrend();
-    }).catch(function(){loadTrend();});
-    return;
+  async function loadTrend() {
+    const leagueEl = document.getElementById('trend-league-sel');
+    const marketEl = document.getElementById('trend-market-sel');
+    const league = leagueEl ? leagueEl.value : '';
+    const market = marketEl ? marketEl.value : '';
+    let url = '/api/ml-accuracy-trend';
+    const params = [];
+    if (league) params.push('league=' + encodeURIComponent(league));
+    if (market) params.push('market=' + encodeURIComponent(market));
+    if (params.length) url += '?' + params.join('&');
+    try {
+      const [res1, res2] = await Promise.all([fetch(url), fetch('/api/ml-picks-accuracy')]);
+      const data = await res1.json();
+      const acc  = await res2.json();
+      if (!league && !market && leagueEl && leagueEl.options.length === 1 && data.league_summary) {
+        data.league_summary.forEach(r => {
+          const o = document.createElement('option');
+          o.value = r.league_name; o.textContent = r.league_name; leagueEl.appendChild(o);
+        });
+      }
+      _drawTrendChart(data.trend || []);
+      _renderLeagueCards(data.league_summary || []);
+      _renderMktLeagueTable(acc.by_market_league || [], league, market);
+    } catch(e) { console.error('loadTrend:', e); }
   }
-  loadPicksAccuracy();
-  var league = trSel.value;
-  var chartType = document.getElementById('tr-chart-type') ? document.getElementById('tr-chart-type').value : 'season';
-  var metaEl = document.getElementById('tr-meta');
-  var kpisEl = document.getElementById('tr-kpis');
-  var tableEl = document.getElementById('tr-table');
-  if (metaEl) metaEl.textContent = 'Caricamento dati...';
-  if (kpisEl) kpisEl.innerHTML = '';
-  if (tableEl) tableEl.innerHTML = '';
-
-  fetch('/api/ml-picks-stats?league=' + encodeURIComponent(league))
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.error) { if (metaEl) metaEl.textContent = 'Errore: ' + d.error; return; }
-      var seasons = d.seasons || [];
-      var rolling = d.rolling || [];
-      var total = d.total || 0;
-
-      // KPI totals
-      var totN = 0, sumO25 = 0, sumBtts = 0, sumEg = 0, cntO25 = 0, cntBtts = 0, cntEg = 0;
-      for (var i = 0; i < seasons.length; i++) {
-        var s = seasons[i];
-        totN += s.n;
-        if (s.over_2_5 != null) { sumO25 += s.over_2_5 * s.n; cntO25 += s.n; }
-        if (s.btts != null) { sumBtts += s.btts * s.n; cntBtts += s.n; }
-        if (s.early_goal != null) { sumEg += s.early_goal * s.n; cntEg += s.n; }
-      }
-      var avgO25 = cntO25 > 0 ? Math.round(sumO25 / cntO25 * 10) / 10 : null;
-      var avgBtts = cntBtts > 0 ? Math.round(sumBtts / cntBtts * 10) / 10 : null;
-      var avgEg = cntEg > 0 ? Math.round(sumEg / cntEg * 10) / 10 : null;
-
-      if (kpisEl) {
-        var kd = [
-          {label:'Partite analizzate', val: total, color:'#1d4ed8', icon:'SS'},
-          {label:'Over 2.5', val: avgO25 != null ? avgO25 + '%' : 'N/D', color:'#7c3aed', icon:'GG'},
-          {label:'BTTS', val: avgBtts != null ? avgBtts + '%' : 'N/D', color:'#0891b2', icon:'TT'},
-          {label:'Gol entro 16min', val: avgEg != null ? avgEg + '%' : 'N/D', color:'#16a34a', icon:'EE'}
-        ];
-        kpisEl.innerHTML = kd.map(function(k) {
-          return '<div style="flex:1;min-width:120px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;text-align:center">' +
-            '<div style="font-size:22px;font-weight:700;color:' + k.color + ';margin:4px 0">' + k.val + '</div>' +
-            '<div style="font-size:11px;color:#6b7280;text-transform:uppercase">' + k.label + '</div>' +
-            '</div>';
-        }).join('');
-      }
-
-      if (metaEl) metaEl.textContent = (league || 'Tutti') + ' - ' + seasons.length + ' stagioni - ' + total + ' partite';
-
-      var ctx = document.getElementById('tr-chart');
-      if (!ctx) return;
-      if (_trChart) { _trChart.destroy(); _trChart = null; }
-      var data = chartType === 'rolling' ? rolling : seasons;
-      var labels = data.map(function(r) { return r.date || r.season || ''; });
-      _trChart = new Chart(ctx.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [
-            { label: 'Over 2.5', data: data.map(function(r){return r.over_2_5;}),
-              borderColor:'#7c3aed', backgroundColor:'rgba(124,58,237,0.1)', tension:0.35, pointRadius:4, fill:true },
-            { label: 'BTTS', data: data.map(function(r){return r.btts;}),
-              borderColor:'#0891b2', backgroundColor:'rgba(8,145,178,0.08)', tension:0.35, pointRadius:4 },
-            { label: 'Win% ML', data: data.map(function(r){return r.ml_acc != null ? r.ml_acc : null;}),
-              borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.08)', tension:0.35, pointRadius:4 }
-          ]
+  function _drawTrendChart(trend) {
+    const canvas = document.getElementById('trend-chart');
+    if (!canvas || !trend.length) return;
+    if (window._trendChart) window._trendChart.destroy();
+    const labels = trend.map(r => {
+      const pts = r.week.split('-');
+      return 'W' + pts[1] + '/' + pts[0].slice(2);
+    });
+    window._trendChart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Accuracy settimanale %',
+            data: trend.map(r => r.accuracy_pct),
+            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
+            tension: 0.35, fill: true, pointRadius: 5 },
+          { label: 'Accuracy cumulativa %',
+            data: trend.map(r => r.cumulative_accuracy_pct),
+            borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.05)',
+            tension: 0.35, fill: false, borderDash: [5,3], pointRadius: 4 }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'top' },
+          title: { display: true, text: 'Curva di apprendimento ML' }
         },
-        options: {
-          responsive:true, maintainAspectRatio:false,
-          interaction:{mode:'index',intersect:false},
-          plugins:{legend:{position:'top'}},
-          scales:{
-            y:{min:0,max:100,title:{display:true,text:'% partite'},grid:{color:'rgba(0,0,0,0.06)'}},
-            x:{ticks:{maxRotation:45}}
-          }
-        }
-      });
-
-      if (tableEl && seasons.length > 0) {
-        var tbl = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead>' +
-          '<tr style="background:#1d4ed8;color:#fff;font-weight:600">' +
-          '<th style="padding:8px 12px;text-align:left">Stagione</th>' +
-          '<th style="padding:8px 12px;text-align:right">Partite</th>' +
-          '<th style="padding:8px 12px;text-align:right">Over 2.5</th>' +
-          '<th style="padding:8px 12px;text-align:right">BTTS</th>' +
-          '<th style="padding:8px 12px;text-align:right">Gol &lt;16min</th>' +
-          '</tr></thead><tbody>';
-        for (var i = 0; i < seasons.length; i++) {
-          var s = seasons[i];
-          var bg = i % 2 === 0 ? '' : 'background:#0f172a;color:#e2e8f0';
-          var pct = function(v) {
-            if (v == null) return '<span style="color:#9ca3af">N/D</span>';
-            var c = v >= 60 ? '#16a34a' : v >= 45 ? '#d97706' : '#dc2626';
-            return '<span style="color:' + c + '">' + v + '%</span>';
-          };
-          tbl += '<tr style="' + bg + '">' +
-            '<td style="padding:7px 12px;border-bottom:1px solid #f1f5f9">' + s.season + '</td>' +
-            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + s.n + '</td>' +
-            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.over_2_5) + '</td>' +
-            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.btts) + '</td>' +
-            '<td style="padding:7px 12px;text-align:right;border-bottom:1px solid #f1f5f9">' + pct(s.early_goal) + '</td>' +
-            '</tr>';
-        }
-        tbl += '</tbody></table>';
-        tableEl.innerHTML = tbl;
+        scales: { y: { min: 0, max: 100,
+          title: { display: true, text: 'Accuracy (%)' },
+          grid: { color: 'rgba(0,0,0,0.05)' } } }
       }
-    })
-    .catch(function(e) { if (metaEl) metaEl.textContent = 'Errore: ' + e.message; });
-}
+    });
+  }
+  function _renderLeagueCards(summary) {
+    const el = document.getElementById('trend-league-cards');
+    if (!el) return;
+    if (!summary.length) { el.innerHTML = ''; return; }
+    const sorted = [...summary].sort((a,b) => b.accuracy_pct - a.accuracy_pct);
+    el.innerHTML = '<h3 style="margin:1.5rem 0 .5rem;font-size:1rem;color:#374151">Accuratezza per Campionato</h3>' +
+      '<div class="cards-grid">' +
+      sorted.map(r => {
+        const pct = r.accuracy_pct || 0;
+        const col = pct >= 55 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+        return '<div class="league-card" style="border-left:4px solid ' + col + '">' +
+          '<div class="lc-name">' + r.league_name + '</div>' +
+          '<div class="lc-pct" style="color:' + col + '">' + pct + '%</div>' +
+          '<div class="lc-sub">' + r.wins + '/' + r.total + ' predizioni</div>' +
+          '</div>';
+      }).join('') + '</div>';
+  }
+
+  function _renderMktLeagueTable(rows, fl, fm) {
+    const el = document.getElementById('trend-mkt-league-wrap');
+    if (!el) return;
+    let filtered = rows;
+    if (fl) filtered = filtered.filter(r => r.league_name === fl);
+    if (fm) filtered = filtered.filter(r => r.market === fm);
+    if (!filtered.length) { el.innerHTML = ''; return; }
+    const mkL = {over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',
+      btts_si:'BTTS S\u00ec',btts_no:'BTTS No','1':'1 Casa','X':'X Pari','2':'2 Ospite'};
+    el.innerHTML = '<h3 style="margin:1.5rem 0 .5rem;font-size:1rem;color:#374151">Accuratezza Mercato × Campionato</h3>' +
+      '<div class="table-wrap"><table class="acc-table"><thead><tr>' +
+      '<th>Campionato</th><th>Mercato</th><th>Tot.</th><th>Corrette</th><th>Accuracy</th><th>Barra</th>' +
+      '</tr></thead><tbody>' +
+      filtered.map(r => {
+        const pct = r.accuracy_pct || 0;
+        const col = pct >= 55 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444';
+        return '<tr><td>' + r.league_name + '</td>' +
+          '<td><span class="mkt-badge">' + (mkL[r.market] || r.market) + '</span></td>' +
+          '<td>' + r.total + '</td><td>' + r.wins + '</td>' +
+          '<td style="color:' + col + ';font-weight:700">' + pct + '%</td>' +
+          '<td><div style="background:#e5e7eb;border-radius:4px;height:8px;width:100px">' +
+          '<div style="background:' + col + ';width:' + Math.min(pct,100) + '%;height:8px;border-radius:4px"></div></div></td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
 
 function loadPicksAccuracy() {
   fetch('/api/ml-picks-accuracy').then(function(r){return r.json();}).then(function(d){
@@ -688,7 +672,7 @@ async function loadPred(){
   try{
     let j=null;
     try{const _ac=new AbortController(),_tid=setTimeout(()=>_ac.abort(),8000);const _cr=await fetch('/api/ml-live-pred-cached',{cache:'no-store',signal:_ac.signal});clearTimeout(_tid);const _cj=await _cr.json();if(_cj&&_cj.last_update>0){j=_cj;j.fixtures_total=j.fixtures_with_picks||0;j.params={capital:1000,kelly_mult:0.25,edge_min:0.03,stake_max:0.05};}}catch(_e){}
-    if(!j){st.textContent='⏳ Dati in aggiornamento, riprova tra qualche secondo...';return;}
+    if(!j){st.textContent='â³ Dati in aggiornamento, riprova tra qualche secondo...';return;}
     if(j.error){st.textContent="Errore: "+j.error;return;}
     const fs=(j.fixtures||[]).filter(f=>f.ml_hints&&f.ml_hints.length);
     st.innerHTML="Live: <b>"+j.fixtures_total+"</b> fixture &middot; <b>"+fs.length+"</b> con predizione ML";
@@ -698,7 +682,7 @@ async function loadPred(){
         const c=h.prob>=70?"#22c55e":h.prob>=55?"#f59e0b":"#38bdf8";
         return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="font-size:12px;color:#cbd5e1;width:130px;flex-shrink:0">${h.label}</span><div style="flex:1;height:7px;background:#0f172a;border-radius:4px;overflow:hidden"><div style="width:${h.prob}%;height:100%;background:${c};border-radius:4px"></div></div><span style="font-size:12px;color:#64748b;width:36px;text-align:right">${h.prob}%</span></div>`;
       }).join("");
-      return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">${f.home} vs ${f.away}</div><div style="font-size:12px;color:#64748b;margin-bottom:10px">${f.league_name||""} · <span data-fid-score="${f.fixture_id}">${f.score}</span> · <span data-fid-min="${f.fixture_id}">${f.minute}'</span></div>${bars}</div>`;
+      return `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px"><div style="font-weight:600;font-size:14px;margin-bottom:2px">${f.home} vs ${f.away}</div><div style="font-size:12px;color:#64748b;margin-bottom:10px">${f.league_name||""} Â· <span data-fid-score="${f.fixture_id}">${f.score}</span> Â· <span data-fid-min="${f.fixture_id}">${f.minute}'</span></div>${bars}</div>`;
     }).join("");
   
 // Salva top-2 predizioni in localStorage
@@ -762,14 +746,14 @@ function downloadPredCSV(){
   const es=v=>v===null?'Pending':v?'SI':'NO';
   for(const e of[...log].reverse())rows.push([fmt(e.ts),e.match,e.league,e.score_at_pred,e.minute_at_pred,(e.preds[0]||{}).label||'',(e.preds[0]||{}).prob||'',es(e.verified[0]),(e.preds[1]||{}).label||'',(e.preds[1]||{}).prob||'',es(e.verified[1])]);
   const csv=rows.map(r=>r.map(cv=>'"'+String(cv).replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const blob=new Blob(['ï»¿'+csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='rei-rei-predizioni-'+new Date().toISOString().slice(0,10)+'.csv';
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
 function clearPredHistory(){if(!confirm('Svuotare lo storico? Questa azione non si annulla.'))return;localStorage.removeItem('rr_pred_log');refreshPredHistory();}
 
-// ── Ultime 30 partite Early Goal ──
+// ââ Ultime 30 partite Early Goal ââ
 var _egRecentOpen=false;
 function toggleRecentMatches(){
   var el=document.getElementById('eg-recent-table'),btn=document.getElementById('eg-recent-btn');
@@ -790,13 +774,13 @@ async function loadRecentMatches(){
     var ms=d.matches||[];
     if(!ms.length){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuna partita trovata per questo campionato.</div>';return;}
     var fmt=function(ts){return ts?new Date(ts*1000).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):'-';};
-    var fgm=function(v){if(v==null)return '<span style="color:#475569">—</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">⚡'+v+"'</span>":v+"'";};
+    var fgm=function(v){if(v==null)return '<span style="color:#475569">â</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">â¡'+v+"'</span>":v+"'";};
     var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Data</th>';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Partita</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1T</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">FT</th>';
-    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1° Gol</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1Â° Gol</th>';
     h+='</tr></thead><tbody>';
     ms.forEach(function(m,i){
       var bg=i%2===0?'':'background:#0f172a;';
@@ -812,7 +796,7 @@ async function loadRecentMatches(){
     });
     var eg16=ms.filter(function(m){return m.first_goal_minute!=null&&m.first_goal_minute<=16;}).length;
     h+='</tbody></table></div>';
-    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite · Gol ≤16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite Â· Gol â¤16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
 }
