@@ -41,7 +41,7 @@
 .filter-group{display:flex;flex-direction:column;gap:4px}
 .filter-group label{font-size:.75rem;font-weight:600;color:#6b7280;text-transform:uppercase}
 .filter-group select{padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.875rem;background:#fff}
-.trend-chart-wrap{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.trend-chart-wrap{background:#fff;border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.08);height:320px;position:relative}
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;margin-bottom:1.5rem}
 .league-card{background:#fff;border-radius:10px;padding:1rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .lc-name{font-size:.8rem;font-weight:600;color:#374151;margin-bottom:4px}
@@ -194,7 +194,7 @@
       </select></div>
     <button onclick="loadTrend()">↻ Aggiorna</button>
   </div>
-  <div class="trend-chart-wrap"><canvas id="trend-chart" height="100"></canvas></div>
+  <div class="trend-chart-wrap"><canvas id="trend-chart" style="width:100%;height:280px"></canvas></div>
   <div id="trend-league-cards" class="league-cards"></div>
   <div id="trend-mkt-league-wrap"></div>
 </section>
@@ -585,7 +585,7 @@ var _trLeaguesLoaded = false;
               ]
             },
             options: {
-              responsive: true, maintainAspectRatio: false,
+              responsive: true,
               plugins: {
                 legend: { position: 'top' },
                 title: { display: true, text: 'Curva di apprendimento ML' }
