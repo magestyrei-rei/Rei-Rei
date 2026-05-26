@@ -231,6 +231,16 @@ def _ensure_picks_ddl():
     try:
         _turso_execute("ALTER TABLE ml_picks_log ADD COLUMN country TEXT")
     except Exception:
+        pass  # colonna gia' presente
+    # Backfill country dai dati predictions_log (idempotente - solo righe con country NULL)
+    try:
+        _turso_execute(
+            "UPDATE ml_picks_log SET country = ("
+            "  SELECT pl.country FROM predictions_log pl"
+            "  WHERE pl.fixture_id = ml_picks_log.fixture_id LIMIT 1"
+            ") WHERE country IS NULL"
+        )
+    except Exception:
         pass
 
 def log_picks(fixture_id, ctx, picks):
