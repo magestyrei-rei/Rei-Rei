@@ -750,7 +750,7 @@ def _compute_fixture_entry(ctx, get_adv_data, capital=1000.0, kelly=0.25, edge_m
     picks.sort(key=lambda x: -x['edge_pct'])
     try:
         import predictions_settlement as _pset
-        _lctx = {'league_name': ctx.get('league_name'), 'home': ctx.get('home'), 'away': ctx.get('away')}
+        _lctx = {'league_name': ctx.get('league_name'), 'country': ctx.get('country'), 'home': ctx.get('home'), 'away': ctx.get('away')}
         _pset.log_picks(fid, _lctx, picks[:6])
     except Exception:
         pass
