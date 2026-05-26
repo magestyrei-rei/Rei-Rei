@@ -11,7 +11,7 @@
 #   GET /api/predictions-log-ddl        -> DDL one-time (token)
 #   GET /api/predictions-settle         -> esegue settlement (token), param ?limit=N&max_age_days=D
 #   GET /api/predictions-log-stats      -> conteggi (open)
-#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercato×campionato
+#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercatoÃcampionato
 #   GET /api/ml-accuracy-trend          -> curva di apprendimento settimanale (param: ?market=&league=)
 #
 # Auto-trigger: maybe_settle() chiamato da odds_logger tick (best-effort, ogni 30 min).
@@ -517,7 +517,7 @@ def register(app):
                 "GROUP BY league_name ORDER BY total DESC LIMIT 20"
             )
 
-            # --- [NUOVO] Accuratezza per mercato × campionato ---
+            # --- [NUOVO] Accuratezza per mercato Ã campionato ---
             # Solo coppie con almeno 3 predizioni (per evitare rumore statistico)
             by_market_league = _turso_select_rows(
                 "SELECT league_name, MIN(country) as country, market, "
@@ -653,21 +653,6 @@ def register(app):
                 'league':            league or 'all',
                 'weeks_tracked':     len(trend_rows),
             })
-        except Exception as e:
-            return jsonify({'error': str(e)[:300]}), 500
-
-    @app.route('/api/eg-leagues')
-    def api_eg_leagues():
-        """Campionati distinti nel feed Early Goal con country per discriminare omonimi."""
-        try:
-            _ensure_ddl()
-            rows = _turso_select_rows(
-                "SELECT league_name, country, league_id, COUNT(*) as n "
-                "FROM predictions_log "
-                "WHERE ft_home IS NOT NULL AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
-                "GROUP BY league_name, country, league_id ORDER BY n DESC LIMIT 100"
-            )
-            return jsonify({'leagues': rows or []})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
