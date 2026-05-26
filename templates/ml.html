@@ -55,6 +55,9 @@
 .mkt-badge{background:#eff6ff;color:#3b82f6;padding:2px 8px;border-radius:12px;font-size:.75rem;font-weight:600}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 </head>
 <body>
 <header>
@@ -562,41 +565,42 @@ var _trLeaguesLoaded = false;
     } catch(e) { console.error('loadTrend:', e); }
   }
   function _drawTrendChart(trend) {
-    const canvas = document.getElementById('trend-chart');
-    if (!canvas || !trend.length) return;
-    if (window._trendChart) window._trendChart.destroy();
-    const labels = trend.map(r => {
-      const pts = r.week.split('-');
-      return 'W' + pts[1] + '/' + pts[0].slice(2);
-    });
-    window._trendChart = new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          { label: 'Accuracy settimanale %',
-            data: trend.map(r => r.accuracy_pct),
-            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
-            tension: 0.35, fill: true, pointRadius: 5 },
-          { label: 'Accuracy cumulativa %',
-            data: trend.map(r => r.cumulative_accuracy_pct),
-            borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.05)',
-            tension: 0.35, fill: false, borderDash: [5,3], pointRadius: 4 }
-        ]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position: 'top' },
-          title: { display: true, text: 'Curva di apprendimento ML' }
-        },
-        scales: { y: { min: 0, max: 100,
-          title: { display: true, text: 'Accuracy (%)' },
-          grid: { color: 'rgba(0,0,0,0.05)' } } }
+        const canvas = document.getElementById('trend-chart');
+        if (!canvas || !trend.length) return;
+        if (window._trendChart) { window._trendChart.destroy(); window._trendChart = null; }
+        function _create() {
+          window._trendChart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: {
+              labels: trend.map(function(r){ var p=r.week.split('-'); return 'W'+p[1]+'/'+p[0].slice(2); }),
+              datasets: [
+                { label: 'Accuracy settimanale %',
+                  data: trend.map(function(r){ return r.accuracy_pct; }),
+                  borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
+                  tension: 0.35, fill: true, pointRadius: 5 },
+                { label: 'Accuracy cumulativa %',
+                  data: trend.map(function(r){ return r.cumulative_accuracy_pct; }),
+                  borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.05)',
+                  tension: 0.35, fill: false, borderDash: [5,3], pointRadius: 4 }
+              ]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'top' },
+                title: { display: true, text: 'Curva di apprendimento ML' }
+              },
+              scales: { y: { min: 0, max: 100,
+                title: { display: true, text: 'Accuracy (%)' },
+                grid: { color: 'rgba(0,0,0,0.05)' } } }
+            }
+          });
+          [50,200,500].forEach(function(ms){
+            setTimeout(function(){ window._trendChart && window._trendChart.resize(); }, ms);
+          });
+        }
+        if (canvas.offsetWidth > 0) { _create(); } else { setTimeout(_create, 80); }
       }
-    });
-    setTimeout(function(){ if(window._trendChart) window._trendChart.resize(); }, 80);
-  }
   function _renderLeagueCards(summary) {
     const el = document.getElementById('trend-league-cards');
     if (!el) return;
