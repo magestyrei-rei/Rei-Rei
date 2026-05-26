@@ -656,32 +656,42 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
-    @app.route('/api/recent-matches')
-    def api_recent_matches():
-        """Ultimi N match con primo gol entro 16' (Early Goal feed), filtrati per campionato."""
+    @app.route('/api/eg-leagues')
+    def api_eg_leagues():
+        """Campionati distinti nel feed Early Goal con country per discriminare omonimi."""
         try:
             _ensure_ddl()
-            limit  = min(int(request.args.get('limit', 30)), 100)
-            league = request.args.get('league', '').strip()
-            if league:
-                rows = _turso_select_rows(
-                    "SELECT fixture_id, league_name, home_team_name, away_team_name, "
-                    "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
-                    "FROM predictions_log WHERE ft_home IS NOT NULL "
-                    "AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
-                    "AND league_name = ? "
-                    "ORDER BY settled_ts DESC LIMIT ?",
-                    [league, limit]
-                )
+            rows = _turso_select_rows(
+                "SELECT league_name, country, league_id, COUNT(*) as n "
+                "FROM predictions_log "
+                "WHERE ft_home IS NOT NULL AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
+                "GROUP BY league_name, country, league_id ORDER BY n DESC LIMIT 100"
+            )
+            return jsonify({'leagues': rows or []})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/recent-matches')
+    def api_recent_matches():
+        """Ultimi N match con primo gol entro 16'. Filtra per league + country per evitare omonimi."""
+        try:
+            _ensure_ddl()
+            limit   = min(int(request.args.get('limit', 30)), 100)
+            league  = request.args.get('league', '').strip()
+            country = request.args.get('country', '').strip()
+            base_sel = (
+                "SELECT fixture_id, league_name, country, league_id, "
+                "home_team_name, away_team_name, "
+                "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
+                "FROM predictions_log WHERE ft_home IS NOT NULL "
+                "AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16"
+            )
+            if league and country:
+                rows = _turso_select_rows(base_sel + " AND league_name = ? AND country = ? ORDER BY settled_ts DESC LIMIT ?", [league, country, limit])
+            elif league:
+                rows = _turso_select_rows(base_sel + " AND league_name = ? ORDER BY settled_ts DESC LIMIT ?", [league, limit])
             else:
-                rows = _turso_select_rows(
-                    "SELECT fixture_id, league_name, home_team_name, away_team_name, "
-                    "ft_home, ft_away, ht_home, ht_away, first_goal_minute, date_utc, settled_ts "
-                    "FROM predictions_log WHERE ft_home IS NOT NULL "
-                    "AND first_goal_minute IS NOT NULL AND first_goal_minute <= 16 "
-                    "ORDER BY settled_ts DESC LIMIT ?",
-                    [limit]
-                )
+                rows = _turso_select_rows(base_sel + " ORDER BY settled_ts DESC LIMIT ?", [limit])
             return jsonify({'matches': rows or [], 'n': len(rows or [])})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
