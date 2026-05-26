@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS ml_picks_log (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   fixture_id   INTEGER NOT NULL,
   league_name  TEXT,
+  country      TEXT,
   home_team    TEXT,
   away_team    TEXT,
   market       TEXT NOT NULL,
@@ -227,6 +228,10 @@ CREATE TABLE IF NOT EXISTS ml_picks_log (
 
 def _ensure_picks_ddl():
     _turso_execute(DDL_PICKS_LOG)
+    try:
+        _turso_execute("ALTER TABLE ml_picks_log ADD COLUMN country TEXT")
+    except Exception:
+        pass
 
 def log_picks(fixture_id, ctx, picks):
     """Salva pick ML per una fixture. UNIQUE(fixture_id,market) ignora duplicati."""
@@ -235,9 +240,9 @@ def log_picks(fixture_id, ctx, picks):
         for p in (picks or []):
             _turso_execute(
                 "INSERT OR IGNORE INTO ml_picks_log "
-                "(fixture_id, league_name, home_team, away_team, market, model_prob, bookie_quota, edge_pct) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                [fixture_id, ctx.get('league_name'), ctx.get('home'), ctx.get('away'),
+                "(fixture_id, league_name, country, home_team, away_team, market, model_prob, bookie_quota, edge_pct) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                [fixture_id, ctx.get('league_name'), ctx.get('country'), ctx.get('home'), ctx.get('away'),
                  p.get('market'), p.get('model_prob'),
                  p.get('quota') or p.get('bookie_quota'), p.get('edge_pct')]
             )
@@ -494,7 +499,7 @@ def register(app):
 
             # --- Accuratezza per campionato (globale) ---
             by_league = _turso_select_rows(
-                "SELECT league_name, "
+                "SELECT league_name, MIN(country) as country, "
                 "COUNT(*) as total, "
                 "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
                 "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
@@ -505,7 +510,7 @@ def register(app):
             # --- [NUOVO] Accuratezza per mercato × campionato ---
             # Solo coppie con almeno 3 predizioni (per evitare rumore statistico)
             by_market_league = _turso_select_rows(
-                "SELECT league_name, market, "
+                "SELECT league_name, MIN(country) as country, market, "
                 "COUNT(*) as total, "
                 "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
                 "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
@@ -621,7 +626,7 @@ def register(app):
                     lg_args.append(market)
                 lg_where = " AND ".join(lg_where_parts)
                 league_summary = _turso_select_rows(
-                    "SELECT league_name, "
+                    "SELECT league_name, MIN(country) as country, "
                     "COUNT(*) as total, "
                     "SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins, "
                     "ROUND(100.0 * SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) / COUNT(*), 1) as accuracy_pct "
