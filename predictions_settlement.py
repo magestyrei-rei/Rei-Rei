@@ -447,6 +447,34 @@ def settle_ml_picks_orphan(limit=50, max_age_days=14):
     except Exception as e:
         return {'error': str(e)[:300]}
 
+
+# ---------- early_goal_log: match con primo gol <=16' da n8n ----------
+
+DDL_EGL = """
+CREATE TABLE IF NOT EXISTS early_goal_log (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  fixture_id      INTEGER UNIQUE,
+  league_id       INTEGER,
+  league_name     TEXT,
+  country         TEXT,
+  home_team       TEXT,
+  away_team       TEXT,
+  ht_home         INTEGER,
+  ht_away         INTEGER,
+  ft_home         INTEGER,
+  ft_away         INTEGER,
+  first_goal_min  INTEGER,
+  match_date      TEXT,
+  source          TEXT DEFAULT 'n8n',
+  logged_ts       INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+)
+""".strip()
+
+def _ensure_egl():
+    _turso_execute(DDL_EGL)
+    _turso_execute("CREATE INDEX IF NOT EXISTS idx_egl_league ON early_goal_log(league_id)")
+    _turso_execute("CREATE INDEX IF NOT EXISTS idx_egl_date   ON early_goal_log(match_date)")
+
 # ---------- routes ----------
 
 def register(app):
@@ -710,5 +738,70 @@ def register(app):
                 'recent':           recent,
                 'auto_state':       _SETTLE_STATE,
             })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/eg-ingest', methods=['POST'])
+    def api_eg_ingest():
+        """Ingest match early-goal da n8n. Accetta lista o singolo oggetto. Token-protected."""
+        tok = request.args.get('token','') or request.headers.get('X-Ingest-Token','')
+        if not INGEST_TOKEN or tok != INGEST_TOKEN:
+            return jsonify({'error':'forbidden'}), 403
+        try:
+            _ensure_egl()
+            data  = request.get_json(force=True) or {}
+            items = data if isinstance(data, list) else [data]
+            ins   = 0
+            for item in items:
+                _turso_execute(
+                    "INSERT OR REPLACE INTO early_goal_log "
+                    "(fixture_id,league_id,league_name,country,home_team,away_team,"
+                    " ht_home,ht_away,ft_home,ft_away,first_goal_min,match_date,source) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [item.get('fixture_id'), item.get('league_id'), item.get('league_name'),
+                     item.get('country'),    item.get('home_team'), item.get('away_team'),
+                     item.get('ht_home'),    item.get('ht_away'),
+                     item.get('ft_home'),    item.get('ft_away'),
+                     item.get('first_goal_min'), item.get('match_date'),
+                     item.get('source','n8n')]
+                )
+                ins += 1
+            return jsonify({'ok': True, 'inserted': ins})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/eg-matches')
+    def api_eg_matches():
+        """Ultimi N match con primo gol <=16' da early_goal_log (fonte n8n)."""
+        try:
+            _ensure_egl()
+            limit   = min(int(request.args.get('limit', 30)), 100)
+            league  = request.args.get('league', '').strip()
+            country = request.args.get('country','').strip()
+            base = ("SELECT fixture_id,league_id,league_name,country,"
+                    "home_team,away_team,ht_home,ht_away,ft_home,ft_away,"
+                    "first_goal_min,match_date,logged_ts "
+                    "FROM early_goal_log WHERE first_goal_min IS NOT NULL AND first_goal_min<=16")
+            if league and country:
+                rows = _turso_select_rows(base+" AND league_name=? AND country=? ORDER BY match_date DESC LIMIT ?",[league,country,limit])
+            elif league:
+                rows = _turso_select_rows(base+" AND league_name=? ORDER BY match_date DESC LIMIT ?",[league,limit])
+            else:
+                rows = _turso_select_rows(base+" ORDER BY match_date DESC LIMIT ?",[limit])
+            return jsonify({'matches': rows or [], 'n': len(rows or [])})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/eg-log-leagues')
+    def api_eg_log_leagues():
+        """Campionati distinti in early_goal_log con almeno 1 match early goal."""
+        try:
+            _ensure_egl()
+            rows = _turso_select_rows(
+                "SELECT league_name,country,league_id,COUNT(*) as n "
+                "FROM early_goal_log WHERE first_goal_min IS NOT NULL AND first_goal_min<=16 "
+                "GROUP BY league_name,country,league_id ORDER BY n DESC LIMIT 100"
+            )
+            return jsonify({'leagues': rows or []})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
