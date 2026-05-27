@@ -11,7 +11,7 @@
 #   GET /api/predictions-log-ddl        -> DDL one-time (token)
 #   GET /api/predictions-settle         -> esegue settlement (token), param ?limit=N&max_age_days=D
 #   GET /api/predictions-log-stats      -> conteggi (open)
-#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercatoÃÂcampionato
+#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercatoÃÂÃÂcampionato
 #   GET /api/ml-accuracy-trend          -> curva di apprendimento settimanale (param: ?market=&league=)
 #
 # Auto-trigger: maybe_settle() chiamato da odds_logger tick (best-effort, ogni 30 min).
@@ -545,7 +545,7 @@ def register(app):
                 "GROUP BY league_name ORDER BY total DESC LIMIT 20"
             )
 
-            # --- [NUOVO] Accuratezza per mercato ÃÂ campionato ---
+            # --- [NUOVO] Accuratezza per mercato ÃÂÃÂ campionato ---
             # Solo coppie con almeno 3 predizioni (per evitare rumore statistico)
             by_market_league = _turso_select_rows(
                 "SELECT league_name, MIN(country) as country, market, "
@@ -857,21 +857,26 @@ def register(app):
             rows = _parse_gs_csv(text)
             out = []
             for row in rows:
-                try:
-                    ma_int = int(row.get('minuto_alert','99'))
-                except:
-                    ma_int = 99
+                # Primo gol: primo valore in minuti_gol (es. "5', 47'" -> 5)
+                mg = row.get('minuti_gol','').strip()
+                first_min = 99
+                if mg:
+                    import re as _re
+                    m = _re.search(r'(\d+)', mg)
+                    if m:
+                        try: first_min = int(m.group(1))
+                        except: pass
                 out.append({
-                    'data':         row.get('data',''),
-                    'campionato':   row.get('campionato', league),
-                    'casa':         row.get('casa',''),
-                    'ospite':       row.get('ospite',''),
-                    'ris_1t':       row.get('ris_1t',''),
-                    'ris_2t':       row.get('ris_2t',''),
-                    'ris_finale':   row.get('ris_finale',''),
-                    'minuti_gol':   row.get('minuti_gol',''),
-                    'minuto_alert': ma_int,
-                    'fixture_id':   row.get('fixture_id',''),
+                    'data':          row.get('data',''),
+                    'campionato':    row.get('campionato', league),
+                    'casa':          row.get('casa',''),
+                    'ospite':        row.get('ospite',''),
+                    'ris_1t':        row.get('ris_1t',''),
+                    'ris_2t':        row.get('ris_2t',''),
+                    'ris_finale':    row.get('ris_finale',''),
+                    'minuti_gol':    mg,
+                    'first_goal_min': first_min,
+                    'fixture_id':    row.get('fixture_id',''),
                 })
             out.sort(key=lambda x: x['data'], reverse=True)
             return jsonify({'matches': out[:30], 'n': len(out)})
