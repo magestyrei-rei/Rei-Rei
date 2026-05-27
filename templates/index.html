@@ -455,6 +455,7 @@ td.odds-cell.no-o{color:#1e2d40}
         <div id="lv-tabs">
           <div class="lv-tab active" data-tab="stats">📊 Statistiche</div>
           <div class="lv-tab" data-tab="matches">📋 Ultime Partite</div>
+          <div class="lv-tab" data-tab="eg-history">⚽ Ultime 30 Partite</div>
         </div>
 
         <!-- Stats tab -->
@@ -499,6 +500,29 @@ td.odds-cell.no-o{color:#1e2d40}
     </div>
   </div>
 </div>
+
+        <div id="eg-history-body" class="tab-body">
+          <div class="matches-controls">
+            <select id="egh-league"><option value="">— Tutti i campionati —</option></select>
+            <span id="egh-count" style="margin-left:8px;opacity:.7;font-size:.85rem"></span>
+          </div>
+          <div class="table-wrap" style="overflow-x:auto;margin-top:10px">
+            <table class="m-table" style="width:100%;min-width:580px">
+              <thead><tr>
+                <th>Data</th>
+                <th>Campionato</th>
+                <th style="text-align:right">Casa</th>
+                <th style="text-align:center">HT</th>
+                <th style="text-align:center">FT</th>
+                <th>Trasferta</th>
+                <th style="text-align:center">Min⚽</th>
+              </tr></thead>
+              <tbody id="egh-tbody">
+                <tr><td colspan="7" style="text-align:center;padding:24px;opacity:.5">Attiva il tab per caricare le partite…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
 <div id="toast-wrap"></div>
 
@@ -897,6 +921,74 @@ if(_isMobile()){$('sidebar').classList.add('collapsed');$('sb-toggle-btn').textC
   await loadLive();
   startSSE();
 })();
+
+// ══ EG-HISTORY – Ultime 30 Partite Early Goal ══════════════════
+let _eghLoaded = false;
+
+async function loadEghLeagues() {
+  try {
+    const r = await fetch('/api/eg-log-leagues');
+    const d = await r.json();
+    const sel = $('egh-league');
+    if (!sel) return;
+    while (sel.options.length > 1) sel.remove(1);
+    (d.leagues || []).forEach(lg => {
+      const o = document.createElement('option');
+      o.value = lg.league_name;
+      o.textContent = lg.league_name + (lg.country ? ' (' + lg.country + ')' : '') + ' [' + lg.n + ']';
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+async function loadEgHistory() {
+  const sel   = $('egh-league');
+  const tbody = $('egh-tbody');
+  const cnt   = $('egh-count');
+  if (!tbody) return;
+  const league = sel ? sel.value : '';
+  const url = '/api/eg-matches?limit=30' + (league ? '&league=' + encodeURIComponent(league) : '');
+  try {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;opacity:.5">Caricamento…</td></tr>';
+    const r = await fetch(url);
+    const d = await r.json();
+    if (cnt) cnt.textContent = d.n ? d.n + ' partite' : '';
+    if (!d.matches || !d.matches.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;opacity:.6">Nessuna partita. Configura n8n per inviare dati a <code>/api/eg-ingest</code>.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.matches.map(m => {
+      const dt  = m.match_date ? m.match_date.slice(0, 10) : '–';
+      const ht  = (m.ht_home != null && m.ht_away != null) ? m.ht_home + '–' + m.ht_away : '–';
+      const ft  = (m.ft_home != null && m.ft_away != null) ? m.ft_home + '–' + m.ft_away : '–';
+      const min = m.first_goal_min != null ? m.first_goal_min + "'" : '–';
+      return '<tr>' +
+        '<td style="white-space:nowrap;font-size:.85rem">' + dt + '</td>' +
+        '<td><small style="opacity:.7">' + (m.league_name||'–') + '</small></td>' +
+        '<td style="text-align:right;font-weight:500">' + (m.home_team||'–') + '</td>' +
+        '<td style="text-align:center;font-variant-numeric:tabular-nums">' + ht + '</td>' +
+        '<td style="text-align:center;font-weight:700;font-variant-numeric:tabular-nums">' + ft + '</td>' +
+        '<td style="font-weight:500">' + (m.away_team||'–') + '</td>' +
+        '<td style="text-align:center;color:var(--accent,#f90)">' + min + '</td>' +
+        '</tr>';
+    }).join('');
+  } catch(e) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7">Errore: ' + e.message + '</td></tr>';
+  }
+}
+
+document.querySelectorAll('.lv-tab').forEach(function(tab) {
+  if (tab.dataset && tab.dataset.tab === 'eg-history') {
+    tab.addEventListener('click', function() {
+      if (!_eghLoaded) {
+        _eghLoaded = true;
+        loadEghLeagues().then(function() { loadEgHistory(); });
+        var sel = $('egh-league');
+        if (sel) sel.addEventListener('change', loadEgHistory);
+      }
+    });
+  }
+});
 </script>
 </body>
 </html>
