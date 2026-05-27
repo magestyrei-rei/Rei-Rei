@@ -11,7 +11,7 @@
 #   GET /api/predictions-log-ddl        -> DDL one-time (token)
 #   GET /api/predictions-settle         -> esegue settlement (token), param ?limit=N&max_age_days=D
 #   GET /api/predictions-log-stats      -> conteggi (open)
-#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercatoÃcampionato
+#   GET /api/ml-picks-accuracy          -> accuratezza per mercato, campionato, mercatoÃÂcampionato
 #   GET /api/ml-accuracy-trend          -> curva di apprendimento settimanale (param: ?market=&league=)
 #
 # Auto-trigger: maybe_settle() chiamato da odds_logger tick (best-effort, ogni 30 min).
@@ -545,7 +545,7 @@ def register(app):
                 "GROUP BY league_name ORDER BY total DESC LIMIT 20"
             )
 
-            # --- [NUOVO] Accuratezza per mercato Ã campionato ---
+            # --- [NUOVO] Accuratezza per mercato ÃÂ campionato ---
             # Solo coppie con almeno 3 predizioni (per evitare rumore statistico)
             by_market_league = _turso_select_rows(
                 "SELECT league_name, MIN(country) as country, market, "
@@ -803,5 +803,77 @@ def register(app):
                 "GROUP BY league_name,country,league_id ORDER BY n DESC LIMIT 100"
             )
             return jsonify({'leagues': rows or []})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+
+    # ---------- Google Sheets proxy (legge dal foglio n8n Goal Alert) ----------
+
+    _GSHEETS_ID = '1OXax8q6A06bj_ZhDyj8P6bfecbELZ4dhrDXQQWnRexU'
+
+    def _gsheets_csv(sheet_name):
+        url = ('https://docs.google.com/spreadsheets/d/'
+               + _GSHEETS_ID + '/gviz/tq?tqx=out:csv&sheet='
+               + urllib.parse.quote(sheet_name))
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read().decode('utf-8')
+
+    def _parse_gs_csv(text):
+        import csv, io
+        reader = csv.reader(io.StringIO(text))
+        rows = list(reader)
+        if not rows:
+            return []
+        headers = [h.strip() for h in rows[0]]
+        return [dict(zip(headers, row)) for row in rows[1:] if any(row)]
+
+    @app.route('/api/gs-leagues')
+    def api_gs_leagues():
+        """Campionati distinti dal foglio Google Sheets _tracking (n8n Goal Alert)."""
+        try:
+            text = _gsheets_csv('_tracking')
+            rows = _parse_gs_csv(text)
+            seen = {}
+            for row in rows:
+                ln  = row.get('league_name','').strip()
+                lid = row.get('league_id','').strip()
+                if ln and ln not in seen:
+                    seen[ln] = lid
+            leagues = [{'league_name': k, 'league_id': v} for k, v in seen.items()]
+            leagues.sort(key=lambda x: x['league_name'])
+            return jsonify({'leagues': leagues})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/gs-matches')
+    def api_gs_matches():
+        """Ultimi 30 match da Google Sheets per campionato (n8n Goal Alert)."""
+        try:
+            league = request.args.get('league','').strip()
+            if not league:
+                return jsonify({'error': 'league parameter required'}), 400
+            text = _gsheets_csv(league)
+            rows = _parse_gs_csv(text)
+            out = []
+            for row in rows:
+                try:
+                    ma_int = int(row.get('minuto_alert','99'))
+                except:
+                    ma_int = 99
+                out.append({
+                    'data':         row.get('data',''),
+                    'campionato':   row.get('campionato', league),
+                    'casa':         row.get('casa',''),
+                    'ospite':       row.get('ospite',''),
+                    'ris_1t':       row.get('ris_1t',''),
+                    'ris_2t':       row.get('ris_2t',''),
+                    'ris_finale':   row.get('ris_finale',''),
+                    'minuti_gol':   row.get('minuti_gol',''),
+                    'minuto_alert': ma_int,
+                    'fixture_id':   row.get('fixture_id',''),
+                })
+            out.sort(key=lambda x: x['data'], reverse=True)
+            return jsonify({'matches': out[:30], 'n': len(out)})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
