@@ -624,7 +624,7 @@ async function selectLeague(lid){
   renderOvCards(st);
   renderChart(st.min_dist||{});
   renderStatsTables(st);
-  applyFilters();
+  applyFilters();const _eg=document.getElementById('egh-league');if(_eg&&data&&data.name){const _n=data.name.includes(' - ')?data.name.split(' - ').pop():data.name;const _o=_eg.querySelector('option[value="'+_n+'"]');if(_o){_eg.value=_n;if(document.querySelector('.lv-tab.active[data-tab="eg-history"]')){_eg.dispatchEvent(new Event('change'));}}}
 }
 
 // Ã¢ÂÂÃ¢ÂÂ OVERVIEW CARDS Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
