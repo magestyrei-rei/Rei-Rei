@@ -767,42 +767,42 @@ function toggleRecentMatches(){
   else{el.style.display='none';btn.innerHTML='&#x1F4CB; Ultime 30 partite del campionato';}
 }
 async function loadRecentMatches(){
-  var league=document.getElementById('e-league').value;
+  var full=document.getElementById('e-league').value;
   var el=document.getElementById('eg-recent-table');
   el.innerHTML='<div style="color:#94a3b8;padding:10px">Caricamento...</div>';
+  if(!full){el.innerHTML='<div style="color:#64748b;padding:10px">Seleziona un campionato.</div>';return;}
   try{
-    var league=document.getElementById('e-league').value;
-      var country=''; if(league.includes(' - ')){country=league.split(' - ')[0]; league=league.split(' - ').slice(1).join(' - ');}
-      var url='/api/recent-matches?league='+encodeURIComponent(league)+'&limit=30'+(country?'&country='+encodeURIComponent(country):'');
-      var r=await fetch(url,{cache:'no-store'});
+    var lr=await fetch('/api/leagues'); var ll=await lr.json();
+    var arr=Array.isArray(ll)?ll:(ll.leagues||[]);
+    var lg=arr.find(function(x){return x.name===full;});
+    if(!lg){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuno storico per questo campionato.</div>';return;}
+    var r=await fetch('/api/leagues/'+lg.id,{cache:'no-store'});
     var d=await r.json();
-    if(d.error){el.innerHTML='<div style="color:#ef4444">Errore: '+d.error+'</div>';return;}
-    var ms=d.matches||[];
+    var ms=(d.recent||[]).slice(0,30);
     if(!ms.length){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuna partita trovata per questo campionato.</div>';return;}
-    var fmt=function(ts){return ts?new Date(ts*1000).toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'}):'-';};
-    var fgm=function(v){if(v==null)return '<span style="color:#475569">â</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">â¡'+v+"'</span>":v+"'";};
+    var fgm=function(v){if(v==null||v==='')return '<span style="color:#475569">-</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">&#x26A1;'+v+"'</span>":v+"'";};
     var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Data</th>';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Partita</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1T</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">FT</th>';
-    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1Â° Gol</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1&#176; Gol</th>';
     h+='</tr></thead><tbody>';
     ms.forEach(function(m,i){
       var bg=i%2===0?'':'background:#0f172a;';
-      var ft=m.ft_home+'-'+m.ft_away;
-      var ht=m.ht_home!=null?m.ht_home+'-'+m.ht_away:'?';
+      var ft=(m.final!=null&&m.final!=='')?m.final:(m.ft_home+'-'+m.ft_away);
+      var ht=(m.ht!=null&&m.ht!=='')?m.ht:(m.ht_home!=null?m.ht_home+'-'+m.ht_away:'?');
       h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
-      h+='<td style="padding:5px 10px;color:#94a3b8;white-space:nowrap">'+fmt(m.settled_ts)+'</td>';
-      h+='<td style="padding:5px 10px;font-weight:500">'+m.home_team_name+' <span style="color:#475569">vs</span> '+m.away_team_name+'</td>';
+      h+='<td style="padding:5px 10px;color:#94a3b8;white-space:nowrap">'+(m.date_str||'-')+'</td>';
+      h+='<td style="padding:5px 10px;font-weight:500">'+m.home_team+' <span style="color:#475569">vs</span> '+m.away_team+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+ht+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;font-weight:600;color:#f0883e">'+ft+'</td>';
-      h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_minute)+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_min)+'</td>';
       h+='</tr>';
     });
-    var eg16=ms.filter(function(m){return m.first_goal_minute!=null&&m.first_goal_minute<=16;}).length;
+    var eg16=ms.filter(function(m){return m.first_goal_min!=null&&m.first_goal_min<=16;}).length;
     h+='</tbody></table></div>';
-    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite Â· Gol â¤16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite &#183; Gol &#8804;16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
 }
