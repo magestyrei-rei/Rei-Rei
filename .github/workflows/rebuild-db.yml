@@ -34,3 +34,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git add football.db.gz
           git diff --staged --quiet || (git commit -m "chore: rebuild football.db.gz from data/" && git pull --rebase origin main && git push)
+
+      # I commit fatti col GITHUB_TOKEN non innescano deploy.yml (anti-loop GitHub),
+      # quindi qui chiamiamo direttamente il Render Deploy Hook.
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "$RENDER_HOOK" || true
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
