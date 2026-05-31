@@ -624,7 +624,7 @@ async function selectLeague(lid){
   renderOvCards(st);
   renderChart(st.min_dist||{});
   renderStatsTables(st);
-  applyFilters();const _eg=document.getElementById('egh-league');if(_eg&&data&&data.name){const _n=data.name.includes(' - ')?data.name.split(' - ').pop():data.name;const _o=_eg.querySelector('option[value="'+_n+'"]');if(_o){_eg.value=_n;if(document.querySelector('.lv-tab.active[data-tab="eg-history"]')){_eg.dispatchEvent(new Event('change'));}}}
+  applyFilters();const _eg=document.getElementById('egh-league');if(_eg&&data&&data.name){const _n=data.name;_eg.value=_n;if(_eg.value===_n&&document.querySelector('.lv-tab.active[data-tab="eg-history"]')){_eg.dispatchEvent(new Event('change'));}}
 }
 
 // Ã¢ÂÂÃ¢ÂÂ OVERVIEW CARDS Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
@@ -924,17 +924,21 @@ if(_isMobile()){$('sidebar').classList.add('collapsed');$('sb-toggle-btn').textC
 
 // Ã¢ÂÂÃ¢ÂÂ EG-HISTORY Ã¢ÂÂ Ultime 30 Partite Early Goal Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 let _eghLoaded = false;
+let _eghMap = {};
 
 async function loadEghLeagues() {
   try {
-    const r = await fetch('/api/gs-leagues');
+    const r = await fetch('/api/leagues');
     const d = await r.json();
     const sel = document.getElementById('egh-league');
     if (!sel) return;
-    (d.leagues || []).forEach(function(lg) {
+    const arr = Array.isArray(d) ? d : (d.leagues || []);
+    arr.sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    arr.forEach(function(lg) {
+      _eghMap[lg.name] = lg.id;
       const opt = document.createElement('option');
-      opt.value = lg.league_name;
-      opt.textContent = lg.league_name;
+      opt.value = lg.name;
+      opt.textContent = lg.name;
       sel.appendChild(opt);
     });
   } catch(e) { console.error('loadEghLeagues', e); }
@@ -952,10 +956,10 @@ async function loadEgHistory() {
   }
   if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;opacity:.6">Caricamento...</td></tr>';
   try {
-    const r = await fetch('/api/gs-matches?league=' + encodeURIComponent(league));
+    const lid = _eghMap[league];
+    const r = await fetch('/api/leagues/' + lid);
     const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    const matches = d.matches || [];
+    const matches = d.recent || [];
     if (cnt) cnt.textContent = matches.length + ' partite';
     if (!matches.length) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;opacity:.6">Nessuna partita trovata</td></tr>';
@@ -963,12 +967,12 @@ async function loadEgHistory() {
     }
     tbody.innerHTML = matches.map(function(m) {
       return '<tr>' +
-        '<td>' + (m.data || '') + '</td>' +
-        '<td style="opacity:.8;font-size:.85rem">' + (m.campionato || '') + '</td>' +
-        '<td style="text-align:right;font-weight:600">' + (m.casa || '') + '</td>' +
-        '<td style="text-align:center">' + (m.ris_1t || '-') + '</td>' +
-        '<td style="text-align:center;font-weight:600">' + (m.ris_finale || '-') + '</td>' +
-        '<td>' + (m.ospite || '') + '</td>' +
+        '<td>' + (m.date_str || '') + '</td>' +
+        '<td style="opacity:.8;font-size:.85rem">' + (d.name || '') + '</td>' +
+        '<td style="text-align:right;font-weight:600">' + (m.home_team || '') + '</td>' +
+        '<td style="text-align:center">' + (m.ht || '-') + '</td>' +
+        '<td style="text-align:center;font-weight:600">' + (m.final || '-') + '</td>' +
+        '<td>' + (m.away_team || '') + '</td>' +
         '<td style="text-align:center;color:#4caf50;font-weight:700">' + (m.first_goal_min !== undefined ? m.first_goal_min : '') + "'" + '</td>' +
         '</tr>';
     }).join('');
@@ -982,7 +986,11 @@ document.querySelectorAll('.lv-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
       if (!_eghLoaded) {
         _eghLoaded = true;
-        loadEghLeagues().then(function() { loadEgHistory(); });
+        loadEghLeagues().then(function() {
+          var s = document.getElementById('egh-league');
+          if (s && S.currentData && S.currentData.name) s.value = S.currentData.name;
+          loadEgHistory();
+        });
         var sel = document.getElementById('egh-league');
         if (sel) sel.addEventListener('change', loadEgHistory);
       }
