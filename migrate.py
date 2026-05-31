@@ -8,9 +8,9 @@ Il file football.db generato va committato su GitHub insieme all'app.
 import sqlite3, re, sys
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent.parent   # cartella Downloads
+DATA_DIR = Path(__file__).parent / 'data'   # cartella data/ nel repo
 DB_PATH  = Path(__file__).parent / 'football.db'
-HTML_RE  = re.compile(r'^(\d+)_gol-16min_2010-2024\.html$')
+HTML_RE  = re.compile(r'^(\d+)_gol-16min\.html$')
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -225,7 +225,7 @@ def run():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
 
-    files = sorted(DATA_DIR.glob('*_gol-16min_2010-2024.html'))
+    files = sorted(DATA_DIR.glob('*_gol-16min.html'))
     total_leagues = total_matches = 0
 
     for f in files:

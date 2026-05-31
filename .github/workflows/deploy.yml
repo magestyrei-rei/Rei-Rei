@@ -2,6 +2,8 @@ name: Deploy to Render
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'data/**'
   workflow_dispatch:
 
 jobs:

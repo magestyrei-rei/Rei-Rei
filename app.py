@@ -825,12 +825,12 @@ if __name__ == '__main__':
         try:
             import migrate
             migrate.DB_PATH = DB_PATH
-            migrate.DATA_DIR = DB_PATH.parent.parent  # Downloads/
+            migrate.DATA_DIR = DB_PATH.parent / 'data'  # data/ nel repo
             migrate.run()
         except Exception as e:
             print(f"ERRORE migrazione: {e}")
-            print("Assicurati che i file *_gol-16min_2010-2024.html")
-            print(f"siano nella cartella: {DB_PATH.parent.parent}")
+            print("Assicurati che i file *_gol-16min.html")
+            print(f"siano nella cartella: {DB_PATH.parent / 'data'}")
             raise SystemExit(1)
 
     print("=" * 55)
