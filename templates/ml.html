@@ -785,6 +785,7 @@ async function loadRecentMatches(){
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Data</th>';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Partita</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1T</th>';
+    h+='<th style="padding:6px 10px;text-align:center;font-weight:600">2T</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">FT</th>';
     h+='<th style="padding:6px 10px;text-align:center;font-weight:600">1&#176; Gol</th>';
     h+='</tr></thead><tbody>';
@@ -792,10 +793,12 @@ async function loadRecentMatches(){
       var bg=i%2===0?'':'background:#0f172a;';
       var ft=(m.final!=null&&m.final!=='')?m.final:(m.ft_home+'-'+m.ft_away);
       var ht=(m.ht!=null&&m.ht!=='')?m.ht:(m.ht_home!=null?m.ht_home+'-'+m.ht_away:'?');
+      var st=(m.st_home!=null?m.st_home+'-'+m.st_away:'?');
       h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
       h+='<td style="padding:5px 10px;color:#94a3b8;white-space:nowrap">'+(m.date_str||'-')+'</td>';
       h+='<td style="padding:5px 10px;font-weight:500">'+m.home_team+' <span style="color:#475569">vs</span> '+m.away_team+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+ht+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+st+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;font-weight:600;color:#f0883e">'+ft+'</td>';
       h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_min)+'</td>';
       h+='</tr>';
