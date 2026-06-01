@@ -691,14 +691,14 @@ async function loadPred(){
     }).join("");
   
 // Salva top-2 predizioni in localStorage
-try{const now=Date.now(),log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');for(const f of fs){const top2=(f.ml_hints||[]).slice(0,2);if(!top2.length)continue;if(log.find(e=>String(e.fixture_id)===String(f.fixture_id)&&(now-e.ts)<600000))continue;log.push({id:String(f.fixture_id)+'_'+now,fixture_id:f.fixture_id,ts:now,match:f.home+' vs '+f.away,league:f.league_name||'',league_id:f.league_id,score_at_pred:f.score,minute_at_pred:f.minute,preds:top2.map(h=>({label:h.label,prob:h.prob})),result:null,verified:[null,null]});}while(log.length>200)log.shift();localStorage.setItem('rr_pred_log',JSON.stringify(log));}catch(_){}
+try{const now=Date.now(),log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');for(const f of fs){const top2=(f.ml_hints||[]).slice(0,2);if(!top2.length)continue;if(log.find(e=>String(e.fixture_id)===String(f.fixture_id)))continue;log.push({id:String(f.fixture_id)+'_'+now,fixture_id:f.fixture_id,ts:now,match:f.home+' vs '+f.away,league:f.league_name||'',league_id:f.league_id,score_at_pred:f.score,minute_at_pred:f.minute,preds:top2.map(h=>({label:h.label,prob:h.prob})),result:null,verified:[null,null]});}while(log.length>200)log.shift();localStorage.setItem('rr_pred_log',JSON.stringify(log));}catch(_){}
 }catch(e){st.textContent="Errore: "+e.message;}
 }
 // === Storico Predizioni ===
 function refreshPredHistory(){
   const el=document.getElementById('tr-pred-table');if(!el)return;
   let log;try{log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');}catch(e){log=[];}
-  const entries=[...log].reverse().slice(0,10);
+  const entries=[...log].reverse().slice(0,30);
   if(!entries.length){el.innerHTML='<p style="color:#64748b;font-size:13px;margin:0">Nessuna predizione. Apri &#x1F52E; Live Predizioni per salvare automaticamente.</p>';return;}
   const fmt=ts=>new Date(ts).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
   const esito=v=>v===null?'<span style="color:#94a3b8">&#x23F3;</span>':v?'<span style="color:#22c55e;font-size:16px">&#x2713;</span>':'<span style="color:#ef4444;font-size:16px">&#x2717;</span>';
