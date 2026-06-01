@@ -197,6 +197,14 @@
   <div class="trend-chart-wrap"><canvas id="trend-chart" style="width:100%;height:280px"></canvas></div>
   <div id="trend-league-cards" class="league-cards"></div>
   <div id="trend-mkt-league-wrap"></div>
+  <div style="margin-top:20px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <h3 style="margin:0;color:#f1f5f9;font-size:15px">&#x1F4DD; Ultime 30 predizioni &middot; esito</h3>
+      <button onclick="loadServerPredictions()" style="padding:5px 12px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:12px;cursor:pointer">&#x21bb; Aggiorna</button>
+      <span style="font-size:11px;color:#64748b">Catturate H24 dal server, anche a telefono spento &middot; ogni match una sola volta</span>
+    </div>
+    <div id="server-pred-table"><div style="color:#64748b;font-size:13px">Caricamento...</div></div>
+  </div>
 </section>
 <section class="view" id="view-how">
     <div class="notes" style="line-height:1.7;font-size:13px">
@@ -373,7 +381,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "eg" && !EG) loadEG();
     if (t.dataset.view === "picks") loadPicks();
     if (t.dataset.view === "acc") loadAccuracy();
-    if (t.dataset.view == "trend") { loadTrend(); refreshPredHistory(); }
+    if (t.dataset.view == "trend") { loadTrend(); refreshPredHistory(); loadServerPredictions(); }
      if (t.dataset.view === "pred") { loadPred(); startPredAutoRefresh(); } else { stopPredAutoRefresh(); }
   });
 });
@@ -693,6 +701,43 @@ async function loadPred(){
 // Salva top-2 predizioni in localStorage
 try{const now=Date.now(),log=JSON.parse(localStorage.getItem('rr_pred_log')||'[]');for(const f of fs){const top2=(f.ml_hints||[]).slice(0,2);if(!top2.length)continue;if(log.find(e=>String(e.fixture_id)===String(f.fixture_id)))continue;log.push({id:String(f.fixture_id)+'_'+now,fixture_id:f.fixture_id,ts:now,match:f.home+' vs '+f.away,league:f.league_name||'',league_id:f.league_id,score_at_pred:f.score,minute_at_pred:f.minute,preds:top2.map(h=>({label:h.label,prob:h.prob})),result:null,verified:[null,null]});}while(log.length>200)log.shift();localStorage.setItem('rr_pred_log',JSON.stringify(log));}catch(_){}
 }catch(e){st.textContent="Errore: "+e.message;}
+}
+// === Ultime 30 predizioni (server, Turso) ===
+async function loadServerPredictions(){
+  var el=document.getElementById('server-pred-table');if(!el)return;
+  el.innerHTML='<div style="color:#64748b;font-size:13px">Caricamento...</div>';
+  try{
+    var r=await fetch('/api/recent-predictions',{cache:'no-store'});var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#ef4444;font-size:13px">Errore: '+d.error+'</div>';return;}
+    var ps=d.predictions||[];
+    if(!ps.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna predizione registrata ancora. Vengono catturate dal server ogni 5 min quando ci sono partite live col primo gol entro il 16\'.</div>';return;}
+    var MKT={'1':'1 (Casa)','X':'X (Pari)','2':'2 (Ospite)','dc_1X':'1X','dc_12':'12','dc_X2':'X2','btts_si':'BTTS Si','btts_no':'BTTS No','over_1_5':'Over 1.5','over_2_5':'Over 2.5','over_3_5':'Over 3.5','under_1_5':'Under 1.5','under_2_5':'Under 2.5','under_3_5':'Under 3.5'};
+    var fmt=function(ts){if(!ts)return '-';var dt=new Date(ts*1000);return dt.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'})+' '+dt.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});};
+    var esito=function(res){var v=(res||'').toUpperCase();if(v==='WIN')return '<span style="color:#22c55e;font-weight:700">&#x2713; vinta</span>';if(v==='LOSS')return '<span style="color:#ef4444;font-weight:700">&#x2717; persa</span>';return '<span style="color:#94a3b8">&#x23F3; in corso</span>';};
+    var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
+    ['Data','Partita','Predizione','Prob','Edge','FT','Esito'].forEach(function(t){h+='<th style="padding:6px 10px;text-align:left;font-weight:600">'+t+'</th>';});
+    h+='</tr></thead><tbody>';
+    var win=0,settled=0;
+    ps.forEach(function(p,i){
+      var bg=i%2===0?'':'background:#0f172a;';
+      var ft=(p.ft_home!=null)?p.ft_home+'-'+p.ft_away:'-';
+      var v=(p.result||'').toUpperCase();
+      if(v==='WIN'||v==='LOSS'){settled++;if(v==='WIN')win++;}
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
+      h+='<td style="padding:5px 10px;color:#94a3b8;white-space:nowrap">'+fmt(p.logged_at)+'</td>';
+      h+='<td style="padding:5px 10px;font-weight:500">'+(p.home_team||'')+' <span style="color:#475569">vs</span> '+(p.away_team||'')+'<div style="font-size:11px;color:#64748b">'+(p.league_name||'')+'</div></td>';
+      h+='<td style="padding:5px 10px">'+(MKT[p.market]||p.market||'-')+'</td>';
+      h+='<td style="padding:5px 10px;color:#f59e0b">'+(p.model_prob!=null?Math.round(p.model_prob*100)+'%':'-')+'</td>';
+      h+='<td style="padding:5px 10px;color:#94a3b8">'+(p.edge_pct!=null?(p.edge_pct>0?'+':'')+Math.round(p.edge_pct)+'%':'-')+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center;color:#f0883e;font-weight:600">'+ft+'</td>';
+      h+='<td style="padding:5px 10px">'+esito(p.result)+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table></div>';
+    if(settled>0){var pct=Math.round(win/settled*100);h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ps.length+' predizioni &middot; settlate: <b>'+settled+'</b> &middot; vinte: <b style="color:#22c55e">'+win+'</b> ('+pct+'%)</div>';}
+    else{h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ps.length+' predizioni &middot; nessuna ancora settlata (esito dopo fine partita)</div>';}
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#ef4444;font-size:13px">Errore: '+e.message+'</div>';}
 }
 // === Storico Predizioni ===
 function refreshPredHistory(){

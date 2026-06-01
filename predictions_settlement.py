@@ -741,6 +741,21 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
+    @app.route('/api/recent-predictions')
+    def api_recent_predictions():
+        """Ultime 30 predizioni (un pick per fixture, dedup) con esito, da ml_picks_log (Turso)."""
+        try:
+            _ensure_picks_ddl()
+            rows = _turso_select_rows(
+                "SELECT fixture_id, league_name, country, home_team, away_team, market, "
+                "model_prob, bookie_quota, edge_pct, result, ft_home, ft_away, logged_at, settled_at "
+                "FROM ml_picks_log WHERE id IN (SELECT MIN(id) FROM ml_picks_log GROUP BY fixture_id) "
+                "ORDER BY logged_at DESC LIMIT 30"
+            )
+            return jsonify({'predictions': rows or []})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300], 'predictions': []}), 500
+
     @app.route('/api/eg-ingest', methods=['POST'])
     def api_eg_ingest():
         """Ingest match early-goal da n8n. Accetta lista o singolo oggetto. Token-protected."""
