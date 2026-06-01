@@ -1,23 +1,30 @@
-name: Odds Logger Tick
+name: Odds + Predictions Tick
+
+# Ogni 10 minuti, in UN solo job, back-to-back:
+#   1) /api/odds-logger-tick   -> snapshot quote live (popola la cache in-memory di Render)
+#   2) /api/ml-live-picks-all  -> genera+logga le predizioni live (RIUSA la cache del passo 1)
+# Le cache condivise (live-fixtures 45s, odds 30s) evitano doppie chiamate api-sports:
+# il passo 2 non rifa /fixtures ne /odds, aggiunge solo gli eventi (1o gol). Cattura H24,
+# indipendente dal browser. (Prima erano 2 Action separate ogni 5 min.)
 
 on:
   schedule:
-    # Every 5 minutes (GitHub Actions cron minimum granularity)
-    - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
     steps:
-      - name: Hit odds-logger-tick endpoint
+      - name: Odds snapshot + predizioni live (cache condivisa)
         env:
           TICK_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
         run: |
           set -e
-          URL="https://rei-rei.onrender.com/api/odds-logger-tick?token=${TICK_TOKEN}"
-          # Render free tier sleeps after 15 min idle - allow extra time on cold start
-          RESPONSE=$(curl -fsSL --max-time 120 --retry 3 --retry-delay 10 "$URL")
-          echo "Response:"
-          echo "$RESPONSE" | head -c 2000
+          echo "== 1) odds-logger-tick (popola cache fixtures+odds) =="
+          curl -fsSL --max-time 150 --retry 3 --retry-delay 10 "https://rei-rei.onrender.com/api/odds-logger-tick?token=${TICK_TOKEN}" | head -c 300 || true
+          echo
+          echo "== 2) ml-live-picks-all (riusa la cache appena popolata) =="
+          curl -fsSL --max-time 170 --retry 3 --retry-delay 10 "https://rei-rei.onrender.com/api/ml-live-picks-all" | head -c 300 || true
+          echo
