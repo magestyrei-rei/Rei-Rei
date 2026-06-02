@@ -973,7 +973,7 @@ async function loadEgHistory() {
         '<td style="text-align:center">' + (m.ht || '-') + '</td>' +
         '<td style="text-align:center;font-weight:600">' + (m.final || '-') + '</td>' +
         '<td>' + (m.away_team || '') + '</td>' +
-        '<td style="text-align:center;color:#4caf50;font-weight:700">' + (m.first_goal_min !== undefined ? m.first_goal_min : '') + "'" + '</td>' +
+        '<td style="text-align:center;font-weight:700;color:' + (m.first_goal_team === 'away' ? '#f87171' : '#4caf50') + '">' + (m.first_goal_min !== undefined ? m.first_goal_min : '') + "'" + '</td>' +
         '</tr>';
     }).join('');
   } catch(e) {

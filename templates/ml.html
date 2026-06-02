@@ -825,7 +825,7 @@ async function loadRecentMatches(){
     var d=await r.json();
     var ms=(d.recent||[]).slice(0,30);
     if(!ms.length){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuna partita trovata per questo campionato.</div>';return;}
-    var fgm=function(v){if(v==null||v==='')return '<span style="color:#475569">-</span>';return v<=16?'<span style="color:#22c55e;font-weight:700">&#x26A1;'+v+"'</span>":v+"'";};
+    var fgm=function(v,team){if(v==null||v==='')return '<span style="color:#475569">-</span>';var c=team==='away'?'#f87171':'#22c55e';if(v<=16)return '<span style="color:'+c+';font-weight:700">&#x26A1;'+v+"'</span>";return team==='away'?'<span style="color:#f87171;font-weight:700">'+v+"'</span>":v+"'";};
     var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Data</th>';
     h+='<th style="padding:6px 10px;text-align:left;font-weight:600">Partita</th>';
@@ -845,7 +845,7 @@ async function loadRecentMatches(){
       h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+ht+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;color:#94a3b8">'+st+'</td>';
       h+='<td style="padding:5px 10px;text-align:center;font-weight:600;color:#f0883e">'+ft+'</td>';
-      h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_min)+'</td>';
+      h+='<td style="padding:5px 10px;text-align:center">'+fgm(m.first_goal_min,m.first_goal_team)+'</td>';
       h+='</tr>';
     });
     var eg16=ms.filter(function(m){return m.first_goal_min!=null&&m.first_goal_min<=16;}).length;
