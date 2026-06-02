@@ -886,7 +886,7 @@ function renderStreaks(){
   var lab={FT:'Finale (FT)',HT:'1° Tempo (HT)',ST:'2° Tempo (ST)'};
   var per=(d.periods&&d.periods[_streaksPeriod])||[];
   var h='<div style="background:#3f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#fecaca;line-height:1.5">';
-  h+='&#x26A0;&#xFE0F; <b>Niente fallacia del giocatore:</b> ogni partita è di squadre diverse e <b>indipendente</b> dalle altre. Una serie <b>NON</b> rende più probabile il contrario: la colonna <b>Prossima</b> è il <b>base rate</b> del campionato e <b>non dipende</b> dalla serie in corso. Non esiste il "è dovuto".';
+  h+='&#x26A0;&#xFE0F; <b>Niente fallacia del giocatore:</b> ogni partita è di squadre diverse e <b>indipendente</b> dalle altre. Una serie <b>NON</b> rende più probabile il contrario: il <b>Base rate</b> è la frequenza storica (= probabilità del prossimo, <b>non</b> dipende dalla serie: non esiste il "è dovuto"). La <b>Quota equa</b> = 1/base rate: c'è <b>valore</b> solo se la quota offerta è PIÙ ALTA di quella equa.';
   h+='</div>';
   h+='<div style="display:flex;gap:6px;margin-bottom:10px">';
   ['FT','HT','ST'].forEach(function(p){
@@ -899,7 +899,7 @@ function renderStreaks(){
   h+='<th style="padding:6px 10px;text-align:center">Sì di fila<br><span style="font-weight:400;font-size:10px;opacity:.8">ora / record</span></th>';
   h+='<th style="padding:6px 10px;text-align:center">No di fila<br><span style="font-weight:400;font-size:10px;opacity:.8">ora / record</span></th>';
   h+='<th style="padding:6px 10px;text-align:center">Base rate</th>';
-  h+='<th style="padding:6px 10px;text-align:center">Prossima &#8776;</th>';
+  h+='<th style="padding:6px 10px;text-align:center">Quota equa<br><span style="font-weight:400;font-size:10px;opacity:.8">Sì / No</span></th>';
   h+='</tr></thead><tbody>';
   per.forEach(function(m,i){
     var bg=i%2===0?'':'background:#0f172a;';
@@ -908,12 +908,14 @@ function renderStreaks(){
     var posStyle=m.cur_dir==='pos'?'color:#22c55e;font-weight:800':'color:#475569';
     var negStyle=m.cur_dir==='neg'?'color:#f87171;font-weight:800':'color:#475569';
     var noPct=(100-m.base_rate).toFixed(1);
+    var fairSi=m.base_rate>0?(100/m.base_rate).toFixed(2):'-';
+    var fairNo=m.base_rate<100?(100/(100-m.base_rate)).toFixed(2):'-';
     h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
     h+='<td style="padding:5px 10px;font-weight:600;color:#e2e8f0">'+m.market+'</td>';
     h+='<td style="padding:5px 10px;text-align:center;'+posStyle+'">'+posCur+' / '+m.max_pos+'</td>';
     h+='<td style="padding:5px 10px;text-align:center;'+negStyle+'">'+negCur+' / '+m.max_neg+'</td>';
     h+='<td style="padding:5px 10px;text-align:center;color:#cbd5e1">Sì '+m.base_rate+'%</td>';
-    h+='<td style="padding:5px 10px;text-align:center;color:#93c5fd">Sì '+m.base_rate+'% · No '+noPct+'%</td>';
+    h+='<td style="padding:5px 10px;text-align:center;color:#93c5fd">Sì '+fairSi+' · No '+fairNo+'</td>';
     h+='</tr>';
   });
   h+='</tbody></table></div>';
