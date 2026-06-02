@@ -475,6 +475,157 @@ def _ensure_egl():
     _turso_execute("CREATE INDEX IF NOT EXISTS idx_egl_league ON early_goal_log(league_id)")
     _turso_execute("CREATE INDEX IF NOT EXISTS idx_egl_date   ON early_goal_log(match_date)")
 
+# ---------- user_bets: paper trading dell'utente (con edge vs base-rate) ----------
+
+import sqlite3 as _sqlite3
+import re as _re_bets
+
+_LOCAL_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'football.db')
+
+DDL_USER_BETS = """
+CREATE TABLE IF NOT EXISTS user_bets (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_ts   INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+  fixture_id   INTEGER,
+  league_id    INTEGER,
+  league_name  TEXT,
+  home_team    TEXT,
+  away_team    TEXT,
+  match_date   TEXT,
+  market       TEXT,
+  minute       INTEGER,
+  score_home   INTEGER,
+  score_away   INTEGER,
+  odds         REAL,
+  stake        REAL DEFAULT 1,
+  base_rate    REAL,
+  fair_odds    REAL,
+  edge_pct     REAL,
+  sample_n     INTEGER,
+  status       TEXT DEFAULT 'pending',
+  ft_home      INTEGER,
+  ft_away      INTEGER,
+  result       TEXT,
+  pnl          REAL,
+  settled_ts   INTEGER
+)
+""".strip()
+
+def _ensure_bets_ddl():
+    _turso_execute(DDL_USER_BETS)
+
+def _bet_market_win(market, fh, fa):
+    """Esito di un mercato dato il risultato FT. None se non valutabile."""
+    if fh is None or fa is None:
+        return None
+    tot = fh + fa
+    btts = (fh > 0 and fa > 0)
+    table = {
+        'over_0_5': tot > 0, 'over_1_5': tot > 1, 'over_2_5': tot > 2,
+        'over_3_5': tot > 3, 'over_4_5': tot > 4,
+        'btts_si': btts, 'btts_no': not btts,
+        '1': fh > fa, 'X': fh == fa, '2': fa > fh,
+    }
+    return table.get(market)
+
+def _bet_timeline(goals_html, goals_text):
+    """Lista ordinata (minuto, is_away|None) dei gol di una partita."""
+    out = []
+    gh = goals_html or ''
+    if gh.strip():
+        for part in _re_bets.split(r'(<span[^>]*away-goal[^>]*>.*?</span>)', gh, flags=_re_bets.DOTALL | _re_bets.IGNORECASE):
+            if not part or not part.strip():
+                continue
+            away = bool(_re_bets.match(r'<span[^>]*away-goal', part, _re_bets.IGNORECASE))
+            for tok in part.split(','):
+                m = _re_bets.search(r'\d+', tok)
+                if m:
+                    out.append((int(m.group()), away))
+    else:
+        for tok in (goals_text or '').split(','):
+            m = _re_bets.search(r'\d+', tok)
+            if m:
+                out.append((int(m.group()), None))
+    out.sort(key=lambda x: x[0])
+    return out
+
+def _bet_base_rate(league_id, market, minute, sh, sa):
+    """% storica del mercato dato lo stato (minuto, punteggio) nella lega. Ritorna (pct|None, n)."""
+    try:
+        con = _sqlite3.connect(_LOCAL_DB)
+        con.row_factory = _sqlite3.Row
+        rows = con.execute(
+            "SELECT goals_html, goals_text, ft_home, ft_away FROM matches WHERE league_id=?",
+            (int(league_id),)
+        ).fetchall()
+        con.close()
+    except Exception:
+        return None, 0
+    cur_total = (sh or 0) + (sa or 0)
+    is_over = market.startswith('over_')
+    matched = won = 0
+    for r in rows:
+        fh, fa = r['ft_home'], r['ft_away']
+        if fh is None or fa is None:
+            continue
+        tl = _bet_timeline(r['goals_html'], r['goals_text'])
+        hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+        aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+        unkM = sum(1 for (mn, aw) in tl if mn <= minute and aw is None)
+        totM = hM + aM + unkM
+        if is_over:
+            if totM != cur_total:
+                continue
+        elif market in ('btts_si', 'btts_no'):
+            if unkM > 0:
+                continue
+            if (hM > 0) != ((sh or 0) > 0) or (aM > 0) != ((sa or 0) > 0):
+                continue
+        else:  # 1 / X / 2
+            if unkM > 0:
+                continue
+            if hM != (sh or 0) or aM != (sa or 0):
+                continue
+        w = _bet_market_win(market, fh, fa)
+        if w is None:
+            continue
+        matched += 1
+        if w:
+            won += 1
+    if matched == 0:
+        return None, 0
+    return round(100.0 * won / matched, 1), matched
+
+def _settle_user_bets(limit=80):
+    """Settla le giocate pending che hanno fixture_id, via API-Football."""
+    _ensure_bets_ddl()
+    rows = _turso_select_rows(
+        "SELECT id, fixture_id, market, odds, stake FROM user_bets "
+        "WHERE result IS NULL AND fixture_id IS NOT NULL LIMIT ?", [int(limit)]
+    )
+    settled = 0
+    for r in rows:
+        try:
+            rec, status = _fetch_fixture(r['fixture_id'])
+            if rec is None:
+                continue
+            fh, fa = rec.get('ft_home'), rec.get('ft_away')
+            w = _bet_market_win(r.get('market'), fh, fa)
+            if w is None:
+                continue
+            stake = r.get('stake') or 1.0
+            odds = r.get('odds') or 0.0
+            pnl = stake * (odds - 1.0) if w else -stake
+            _turso_execute(
+                "UPDATE user_bets SET status='settled', ft_home=?, ft_away=?, result=?, pnl=?, settled_ts=? WHERE id=?",
+                [fh, fa, ('WIN' if w else 'LOSS'), round(pnl, 2), int(time.time()), r['id']]
+            )
+            settled += 1
+            time.sleep(0.2)
+        except Exception:
+            pass
+    return settled
+
 # ---------- routes ----------
 
 def register(app):
@@ -895,5 +1046,118 @@ def register(app):
                 })
             out.sort(key=lambda x: x['data'], reverse=True)
             return jsonify({'matches': out[:30], 'n': len(out)})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    # ---------- user_bets (paper trading) ----------
+
+    @app.route('/api/bets/fixtures')
+    def api_bets_fixtures():
+        """Partite del giorno per un campionato (per agganciare il fixture_id)."""
+        try:
+            league = int(request.args.get('league') or 0)
+            date   = (request.args.get('date') or '').strip()  # YYYY-MM-DD
+            if not league or len(date) < 10:
+                return jsonify({'fixtures': []})
+            year = int(date[:4])
+            seen = {}
+            for season in (year, year - 1):
+                try:
+                    data = _af_get('/fixtures', params={'league': league, 'season': season, 'date': date})
+                    for f in (data.get('response') or []):
+                        fx = f.get('fixture') or {}
+                        t  = f.get('teams') or {}
+                        fid = fx.get('id')
+                        if fid and fid not in seen:
+                            seen[fid] = {
+                                'fixture_id': fid,
+                                'home': (t.get('home') or {}).get('name'),
+                                'away': (t.get('away') or {}).get('name'),
+                                'time': (fx.get('date') or '')[11:16],
+                            }
+                except Exception:
+                    pass
+            return jsonify({'fixtures': list(seen.values())})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300], 'fixtures': []}), 500
+
+    @app.route('/api/bets', methods=['POST'])
+    def api_bets_add():
+        """Registra una giocata (locked) + calcola edge vs base-rate del database."""
+        try:
+            _ensure_bets_ddl()
+            d = request.get_json(force=True) or {}
+            league_id = int(d.get('league_id') or 0)
+            market    = (d.get('market') or '').strip()
+            minute    = int(d.get('minute') or 0)
+            sh        = int(d.get('score_home') or 0)
+            sa        = int(d.get('score_away') or 0)
+            odds      = float(d.get('odds') or 0)
+            stake     = float(d.get('stake') or 1)
+            if not league_id or not market or odds <= 1.0:
+                return jsonify({'error': 'Dati mancanti: campionato, mercato e quota (>1) sono obbligatori'}), 400
+            br, n = _bet_base_rate(league_id, market, minute, sh, sa)
+            fair    = round(100.0 / br, 2) if (br and br > 0) else None
+            implied = round(100.0 / odds, 1)
+            edge    = round(br - implied, 1) if (br is not None) else None
+            _turso_execute(
+                "INSERT INTO user_bets "
+                "(fixture_id,league_id,league_name,home_team,away_team,match_date,market,minute,"
+                " score_home,score_away,odds,stake,base_rate,fair_odds,edge_pct,sample_n) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [d.get('fixture_id'), league_id, d.get('league_name'), d.get('home_team'),
+                 d.get('away_team'), d.get('match_date'), market, minute, sh, sa, odds, stake,
+                 br, fair, edge, n]
+            )
+            return jsonify({'ok': True, 'base_rate': br, 'sample': n,
+                            'fair_odds': fair, 'implied_pct': implied, 'edge_pct': edge})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/bets')
+    def api_bets_list():
+        """Lista giocate + statistiche aggregate (edge, ROI, win%, calibrazione)."""
+        try:
+            _ensure_bets_ddl()
+            rows = _turso_select_rows("SELECT * FROM user_bets ORDER BY created_ts DESC LIMIT 300")
+            settled = [r for r in rows if r.get('result') in ('WIN', 'LOSS')]
+            n = len(settled)
+            wins = sum(1 for r in settled if r.get('result') == 'WIN')
+            staked = sum((r.get('stake') or 0) for r in settled)
+            pnl = sum((r.get('pnl') or 0) for r in settled)
+            edges = [r.get('edge_pct') for r in rows if r.get('edge_pct') is not None]
+            base_settled = [r.get('base_rate') for r in settled if r.get('base_rate') is not None]
+            stats = {
+                'total': len(rows),
+                'settled': n,
+                'pending': len(rows) - n,
+                'win_rate': round(100.0 * wins / n, 1) if n else None,
+                'roi_pct': round(100.0 * pnl / staked, 1) if staked else None,
+                'pnl': round(pnl, 2),
+                'staked': round(staked, 2),
+                'avg_edge': round(sum(edges) / len(edges), 1) if edges else None,
+                'avg_base_rate': round(sum(base_settled) / len(base_settled), 1) if base_settled else None,
+            }
+            return jsonify({'bets': rows, 'stats': stats})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/bets/settle')
+    def api_bets_settle():
+        """Settla le giocate pending (via fixture_id + API-Football)."""
+        try:
+            try:    lim = int(request.args.get('limit', '80'))
+            except: lim = 80
+            n = _settle_user_bets(limit=lim)
+            return jsonify({'ok': True, 'settled': n})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/bets/<int:bet_id>', methods=['DELETE'])
+    def api_bets_delete(bet_id):
+        try:
+            _ensure_bets_ddl()
+            _turso_execute("DELETE FROM user_bets WHERE id=?", [bet_id])
+            return jsonify({'ok': True})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
