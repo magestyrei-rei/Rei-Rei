@@ -493,7 +493,9 @@ def api_league_streaks(lid):
         ORDER BY sort_date ASC, time_str ASC
     """, (lid,))
 
-    MARKETS = ['1', 'X', '2', 'BTTS', 'Over 0.5', 'Over 1.5',
+    # NB: niente 'Over 0.5' -> nel dataset (solo match con 1o gol <=16') vale ~100%,
+    # mercato degenere/non informativo. ST Over 0.5 sarebbe l'unico utile (rimettibile).
+    MARKETS = ['1', 'X', '2', 'BTTS', 'Over 1.5',
                'Over 2.5', 'Over 3.5', 'Over 4.5']
 
     def market_hits(h, a):
