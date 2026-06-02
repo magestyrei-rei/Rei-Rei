@@ -513,6 +513,10 @@ CREATE TABLE IF NOT EXISTS user_bets (
 
 def _ensure_bets_ddl():
     _turso_execute(DDL_USER_BETS)
+    try:
+        _turso_execute("ALTER TABLE user_bets ADD COLUMN placed INTEGER DEFAULT 1")
+    except Exception:
+        pass  # colonna gia' presente
 
 def _bet_market_win(market, fh, fa):
     """Esito di un mercato dato il risultato FT. None se non valutabile."""
@@ -1100,14 +1104,15 @@ def register(app):
             fair    = round(100.0 / br, 2) if (br and br > 0) else None
             implied = round(100.0 / odds, 1)
             edge    = round(br - implied, 1) if (br is not None) else None
+            placed = 0 if str(d.get('placed', 1)).lower() in ('0', 'false', 'no') else 1
             _turso_execute(
                 "INSERT INTO user_bets "
                 "(fixture_id,league_id,league_name,home_team,away_team,match_date,market,minute,"
-                " score_home,score_away,odds,stake,base_rate,fair_odds,edge_pct,sample_n) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " score_home,score_away,odds,stake,base_rate,fair_odds,edge_pct,sample_n,placed) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [d.get('fixture_id'), league_id, d.get('league_name'), d.get('home_team'),
                  d.get('away_team'), d.get('match_date'), market, minute, sh, sa, odds, stake,
-                 br, fair, edge, n]
+                 br, fair, edge, n, placed]
             )
             return jsonify({'ok': True, 'base_rate': br, 'sample': n,
                             'fair_odds': fair, 'implied_pct': implied, 'edge_pct': edge})
@@ -1120,23 +1125,34 @@ def register(app):
         try:
             _ensure_bets_ddl()
             rows = _turso_select_rows("SELECT * FROM user_bets ORDER BY created_ts DESC LIMIT 300")
-            settled = [r for r in rows if r.get('result') in ('WIN', 'LOSS')]
-            n = len(settled)
-            wins = sum(1 for r in settled if r.get('result') == 'WIN')
-            staked = sum((r.get('stake') or 0) for r in settled)
-            pnl = sum((r.get('pnl') or 0) for r in settled)
-            edges = [r.get('edge_pct') for r in rows if r.get('edge_pct') is not None]
-            base_settled = [r.get('base_rate') for r in settled if r.get('base_rate') is not None]
+            def _is_placed(r):
+                return (r.get('placed') is None) or (r.get('placed') == 1)
+            real  = [r for r in rows if _is_placed(r)]
+            nobet = [r for r in rows if not _is_placed(r)]
+            rset = [r for r in real  if r.get('result') in ('WIN', 'LOSS')]
+            nset = [r for r in nobet if r.get('result') in ('WIN', 'LOSS')]
+            n = len(rset)
+            wins = sum(1 for r in rset if r.get('result') == 'WIN')
+            staked = sum((r.get('stake') or 0) for r in rset)
+            pnl = sum((r.get('pnl') or 0) for r in rset)
+            edges = [r.get('edge_pct') for r in real if r.get('edge_pct') is not None]
+            base_settled = [r.get('base_rate') for r in rset if r.get('base_rate') is not None]
+            nwins = sum(1 for r in nset if r.get('result') == 'WIN')
+            nhyp = sum((r.get('pnl') or 0) for r in nset)
             stats = {
-                'total': len(rows),
+                'total': len(real),
                 'settled': n,
-                'pending': len(rows) - n,
+                'pending': len(real) - n,
                 'win_rate': round(100.0 * wins / n, 1) if n else None,
                 'roi_pct': round(100.0 * pnl / staked, 1) if staked else None,
                 'pnl': round(pnl, 2),
                 'staked': round(staked, 2),
                 'avg_edge': round(sum(edges) / len(edges), 1) if edges else None,
                 'avg_base_rate': round(sum(base_settled) / len(base_settled), 1) if base_settled else None,
+                'nobet_total': len(nobet),
+                'nobet_settled': len(nset),
+                'nobet_win_rate': round(100.0 * nwins / len(nset), 1) if nset else None,
+                'nobet_hyp_pnl': round(nhyp, 2),
             }
             return jsonify({'bets': rows, 'stats': stats})
         except Exception as e:
@@ -1159,5 +1175,52 @@ def register(app):
             _ensure_bets_ddl()
             _turso_execute("DELETE FROM user_bets WHERE id=?", [bet_id])
             return jsonify({'ok': True})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/bets/preview')
+    def api_bets_preview():
+        """Anteprima edge SENZA registrare nulla."""
+        try:
+            league_id = int(request.args.get('league_id') or 0)
+            market    = (request.args.get('market') or '').strip()
+            minute    = int(request.args.get('minute') or 0)
+            sh        = int(request.args.get('score_home') or 0)
+            sa        = int(request.args.get('score_away') or 0)
+            odds      = float(request.args.get('odds') or 0)
+            if not league_id or not market:
+                return jsonify({'error': 'campionato e mercato richiesti'}), 400
+            br, n = _bet_base_rate(league_id, market, minute, sh, sa)
+            fair    = round(100.0 / br, 2) if (br and br > 0) else None
+            implied = round(100.0 / odds, 1) if odds > 1 else None
+            edge    = round(br - implied, 1) if (br is not None and implied is not None) else None
+            return jsonify({'base_rate': br, 'sample': n, 'fair_odds': fair,
+                            'implied_pct': implied, 'edge_pct': edge})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/bets/<int:bet_id>/result', methods=['POST'])
+    def api_bets_result(bet_id):
+        """Imposta a mano il risultato finale di una giocata -> settla."""
+        try:
+            _ensure_bets_ddl()
+            d = request.get_json(force=True) or {}
+            fh = int(d.get('ft_home'))
+            fa = int(d.get('ft_away'))
+            rows = _turso_select_rows("SELECT market, odds, stake FROM user_bets WHERE id=?", [bet_id])
+            if not rows:
+                return jsonify({'error': 'giocata non trovata'}), 404
+            b = rows[0]
+            w = _bet_market_win(b.get('market'), fh, fa)
+            if w is None:
+                return jsonify({'error': 'mercato non valutabile'}), 400
+            stake = b.get('stake') or 1.0
+            odds  = b.get('odds') or 0.0
+            pnl = stake * (odds - 1.0) if w else -stake
+            _turso_execute(
+                "UPDATE user_bets SET status='settled', ft_home=?, ft_away=?, result=?, pnl=?, settled_ts=? WHERE id=?",
+                [fh, fa, ('WIN' if w else 'LOSS'), round(pnl, 2), int(time.time()), bet_id]
+            )
+            return jsonify({'ok': True, 'result': ('WIN' if w else 'LOSS')})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500

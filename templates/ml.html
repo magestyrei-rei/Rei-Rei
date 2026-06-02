@@ -87,7 +87,9 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
         <div><label style="font-size:11px;color:#94a3b8">Campionato</label><select id="bet-league" style="width:100%"></select></div>
         <div><label style="font-size:11px;color:#94a3b8">Data</label><input type="date" id="bet-date" style="width:100%"></div>
-        <div style="grid-column:1/-1"><label style="font-size:11px;color:#94a3b8">Partita</label><select id="bet-fixture" style="width:100%"><option value="">— seleziona campionato + data —</option></select></div>
+        <div style="grid-column:1/-1"><label style="font-size:11px;color:#94a3b8">Partita (dal menu = esito automatico)</label><select id="bet-fixture" style="width:100%"><option value="">— seleziona campionato + data —</option></select></div>
+        <div><label style="font-size:11px;color:#94a3b8">Casa (auto o a mano)</label><input type="text" id="bet-home" placeholder="Squadra casa" style="width:100%"></div>
+        <div><label style="font-size:11px;color:#94a3b8">Ospite (auto o a mano)</label><input type="text" id="bet-away" placeholder="Squadra ospite" style="width:100%"></div>
         <div><label style="font-size:11px;color:#94a3b8">Mercato</label><select id="bet-market" style="width:100%">
           <option value="over_0_5">Over 0.5</option><option value="over_1_5" selected>Over 1.5</option>
           <option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
@@ -98,8 +100,10 @@
         <div><label style="font-size:11px;color:#94a3b8">Punteggio (Casa-Ospite)</label><div style="display:flex;gap:4px;align-items:center"><input type="number" id="bet-sh" value="1" min="0" style="width:46%"><span style="color:#64748b">-</span><input type="number" id="bet-sa" value="0" min="0" style="width:46%"></div></div>
         <div><label style="font-size:11px;color:#94a3b8">Quota d'ingresso</label><input type="number" id="bet-odds" value="1.60" step="0.01" min="1.01" style="width:100%"></div>
         <div><label style="font-size:11px;color:#94a3b8">Stake (unita)</label><input type="number" id="bet-stake" value="1" step="0.5" min="0" style="width:100%"></div>
+        <div><label style="font-size:11px;color:#94a3b8">Tipo</label><select id="bet-placed" style="width:100%"><option value="1">Investita</option><option value="0">Solo analisi (non investita)</option></select></div>
       </div>
-      <button onclick="addBet()" style="margin-top:10px;padding:8px 18px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Registra giocata</button>
+      <button onclick="previewBet()" style="margin-top:10px;padding:8px 16px;background:#0f172a;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:14px;cursor:pointer">Calcola edge (anteprima)</button>
+      <button onclick="addBet()" style="margin-top:10px;margin-left:6px;padding:8px 18px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Registra giocata</button>
       <div id="bet-feedback" style="margin-top:10px;font-size:13px"></div>
     </div>
     <div id="bet-stats" style="margin-bottom:14px"></div>
@@ -971,6 +975,8 @@ async function loadBets(){
       var dt=document.getElementById('bet-date');if(dt&&!dt.value){dt.value=new Date().toISOString().slice(0,10);}
       sel.addEventListener('change',loadBetFixtures);
       dt.addEventListener('change',loadBetFixtures);
+      var fxs=document.getElementById('bet-fixture');
+      if(fxs)fxs.addEventListener('change',function(){var v=this.value;if(!v)return;try{var f=JSON.parse(v);document.getElementById('bet-home').value=f.h||'';document.getElementById('bet-away').value=f.a||'';}catch(e){}});
     }catch(e){}
   }
   refreshBetList();
@@ -989,29 +995,50 @@ async function loadBetFixtures(){
     fx.forEach(function(f){var o=document.createElement('option');o.value=JSON.stringify({id:f.fixture_id,h:f.home,a:f.away});o.textContent=(f.time?f.time+' ':'')+f.home+' - '+f.away;sel.appendChild(o);});
   }catch(e){sel.innerHTML='<option value="">Errore caricamento partite</option>';}
 }
-async function addBet(){
-  var fb=document.getElementById('bet-feedback');
+function _betBody(){
   var lidSel=document.getElementById('bet-league');var lid=lidSel.value;
-  if(!lid){fb.innerHTML='<span style="color:#f87171">Seleziona un campionato.</span>';return;}
   var fxRaw=document.getElementById('bet-fixture').value;var fx=null;try{fx=fxRaw?JSON.parse(fxRaw):null;}catch(e){}
-  var body={league_id:parseInt(lid),league_name:lidSel.options[lidSel.selectedIndex].textContent,
+  return {league_id:lid?parseInt(lid):0,
+    league_name:lid?lidSel.options[lidSel.selectedIndex].textContent:'',
     match_date:document.getElementById('bet-date').value,
-    fixture_id:fx?fx.id:null,home_team:fx?fx.h:null,away_team:fx?fx.a:null,
+    fixture_id:fx?fx.id:null,
+    home_team:document.getElementById('bet-home').value||(fx?fx.h:null),
+    away_team:document.getElementById('bet-away').value||(fx?fx.a:null),
     market:document.getElementById('bet-market').value,
     minute:parseInt(document.getElementById('bet-minute').value||'0'),
     score_home:parseInt(document.getElementById('bet-sh').value||'0'),
     score_away:parseInt(document.getElementById('bet-sa').value||'0'),
     odds:parseFloat(document.getElementById('bet-odds').value||'0'),
-    stake:parseFloat(document.getElementById('bet-stake').value||'1')};
+    stake:parseFloat(document.getElementById('bet-stake').value||'1'),
+    placed:document.getElementById('bet-placed').value};
+}
+function _edgeHtml(d,prefix){
+  if(d.error)return '<span style="color:#f87171">'+d.error+'</span>';
+  var col,txt;
+  if(d.base_rate==null){col='#94a3b8';txt=prefix+' Base rate non disponibile (campione insufficiente per questo stato/punteggio).';}
+  else{col=d.edge_pct>=0?'#22c55e':'#f87171';txt=prefix+' Base rate <b>'+d.base_rate+'%</b> (n='+d.sample+') &middot; quota equa <b>'+d.fair_odds+'</b> &middot; tua implicita '+(d.implied_pct||'?')+'% &middot; <b>edge '+(d.edge_pct>=0?'+':'')+d.edge_pct+'%</b> '+(d.edge_pct>=0?'&#x2705; valore':'&#x274C; sfavorevole');}
+  return '<div style="padding:8px 10px;background:#0f172a;border-radius:6px;border-left:3px solid '+col+'">'+txt+'</div>';
+}
+async function previewBet(){
+  var fb=document.getElementById('bet-feedback');var b=_betBody();
+  if(!b.league_id){fb.innerHTML='<span style="color:#f87171">Seleziona un campionato.</span>';return;}
+  fb.innerHTML='<span style="color:#94a3b8">Calcolo...</span>';
+  try{
+    var q='/api/bets/preview?league_id='+b.league_id+'&market='+b.market+'&minute='+b.minute+'&score_home='+b.score_home+'&score_away='+b.score_away+'&odds='+b.odds;
+    var r=await fetch(q);var d=await r.json();
+    fb.innerHTML=_edgeHtml(d,'<b>Anteprima</b> (non registrata) &middot;');
+  }catch(e){fb.innerHTML='<span style="color:#f87171">Errore: '+e.message+'</span>';}
+}
+async function addBet(){
+  var fb=document.getElementById('bet-feedback');var b=_betBody();
+  if(!b.league_id){fb.innerHTML='<span style="color:#f87171">Seleziona un campionato.</span>';return;}
   fb.innerHTML='<span style="color:#94a3b8">Registro...</span>';
   try{
-    var r=await fetch('/api/bets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r=await fetch('/api/bets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
     var d=await r.json();
     if(d.error){fb.innerHTML='<span style="color:#f87171">'+d.error+'</span>';return;}
-    var col,txt;
-    if(d.base_rate==null){col='#94a3b8';txt='Registrata. Base rate non disponibile (campione insufficiente per questo stato).';}
-    else{col=d.edge_pct>=0?'#22c55e':'#f87171';txt='Registrata. Base rate <b>'+d.base_rate+'%</b> (n='+d.sample+') &middot; quota equa <b>'+d.fair_odds+'</b> &middot; tua implicita '+d.implied_pct+'% &middot; <b>edge '+(d.edge_pct>=0?'+':'')+d.edge_pct+'%</b> '+(d.edge_pct>=0?'(valore)':'(sfavorevole)');}
-    fb.innerHTML='<div style="padding:8px 10px;background:#0f172a;border-radius:6px;border-left:3px solid '+col+'">'+txt+'</div>';
+    var tag=(b.placed=='0')?' come NON investita (solo analisi)':'';
+    fb.innerHTML=_edgeHtml(d,'<b>Registrata'+tag+'.</b>');
     refreshBetList();
   }catch(e){fb.innerHTML='<span style="color:#f87171">Errore: '+e.message+'</span>';}
 }
@@ -1024,6 +1051,17 @@ async function settleBets(){
 async function delBet(id){
   if(!confirm('Eliminare questa giocata?'))return;
   try{await fetch('/api/bets/'+id,{method:'DELETE'});refreshBetList();}catch(e){}
+}
+async function setResult(id){
+  var inp=document.getElementById('res-'+id);if(!inp)return;
+  var m=(inp.value||'').match(/(\d+)\s*[-:\s]\s*(\d+)/);
+  if(!m){alert('Scrivi il risultato finale come 2-1');return;}
+  try{
+    var r=await fetch('/api/bets/'+id+'/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ft_home:parseInt(m[1]),ft_away:parseInt(m[2])})});
+    var d=await r.json();
+    if(d.error){alert(d.error);return;}
+    refreshBetList();
+  }catch(e){alert('Errore: '+e.message);}
 }
 async function refreshBetList(){
   var el=document.getElementById('bet-table'),st=document.getElementById('bet-stats');
@@ -1043,6 +1081,10 @@ async function refreshBetList(){
     if(s.win_rate!=null&&s.avg_base_rate!=null){
       html+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Calibrazione: win% reale <b style="color:#e2e8f0">'+s.win_rate+'%</b> vs base rate medio <b style="color:#e2e8f0">'+s.avg_base_rate+'%</b> &mdash; se combaciano, le tue letture del database sono affidabili.</div>';
     }
+    if(s.nobet_total){
+      var hcol=s.nobet_hyp_pnl>0?'#f87171':'#22c55e';
+      html+='<div style="margin-top:6px;font-size:12px;color:#94a3b8">Non investite (solo analisi): <b style="color:#e2e8f0">'+s.nobet_total+'</b> &middot; settlate '+s.nobet_settled+' &middot; win% '+(s.nobet_win_rate==null?'—':s.nobet_win_rate+'%')+' &middot; P&amp;L se le avessi giocate: <b style="color:'+hcol+'">'+(s.nobet_hyp_pnl>=0?'+':'')+s.nobet_hyp_pnl+'</b> '+(s.nobet_hyp_pnl>0?'(stavi saltando delle vincenti!)':'(bene: stavi saltando delle perdenti)')+'</div>';
+    }
     st.innerHTML=html;
     if(!bets.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna giocata registrata. Compila il form sopra per iniziare.</div>';return;}
     var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">'
@@ -1053,11 +1095,11 @@ async function refreshBetList(){
       var bg=i%2?'background:#0f172a;':'';
       var ft=(b.ft_home!=null)?' ('+b.ft_home+'-'+b.ft_away+')':'';
       var edge=b.edge_pct==null?'—':'<span style="color:'+(b.edge_pct>=0?'#22c55e':'#f87171')+'">'+(b.edge_pct>=0?'+':'')+b.edge_pct+'%</span>';
-      var res=b.result==='WIN'?'<span style="color:#22c55e;font-weight:700">VINTA</span>':(b.result==='LOSS'?'<span style="color:#f87171;font-weight:700">PERSA</span>':'<span style="color:#94a3b8">in attesa</span>');
+      var res=b.result==='WIN'?'<span style="color:#22c55e;font-weight:700">VINTA</span>':(b.result==='LOSS'?'<span style="color:#f87171;font-weight:700">PERSA</span>':('<input id="res-'+b.id+'" placeholder="2-1" style="width:48px;padding:3px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px"> <button onclick="setResult('+b.id+')" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:4px;cursor:pointer" title="Imposta risultato">&#x2713;</button>'));
       var pnl=b.pnl==null?'':'<span style="color:'+(b.pnl>=0?'#22c55e':'#f87171')+'">'+(b.pnl>=0?'+':'')+b.pnl+'</span>';
       h+='<tr style="border-top:1px solid #1e293b;'+bg+'">'
         +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+(b.match_date||'—')+'</td>'
-        +'<td style="padding:5px 8px">'+((b.home_team||'?')+' - '+(b.away_team||'?'))+ft+'</td>'
+        +'<td style="padding:5px 8px">'+((b.placed===0)?'<span style="font-size:10px;color:#f59e0b">[analisi] </span>':'')+((b.home_team||'?')+' - '+(b.away_team||'?'))+ft+'</td>'
         +'<td style="padding:5px 8px;text-align:center">'+(_MKTLAB[b.market]||b.market)+'</td>'
         +'<td style="padding:5px 8px;text-align:center;color:#94a3b8">'+b.minute+"' "+b.score_home+'-'+b.score_away+'</td>'
         +'<td style="padding:5px 8px;text-align:center">'+b.odds+'</td>'
