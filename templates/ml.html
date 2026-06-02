@@ -150,6 +150,8 @@
     <div style="margin-top:14px">
       <button onclick="toggleRecentMatches()" id="eg-recent-btn" style="padding:7px 16px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x26A1; Ultime 30 early goal (â¤16')</button>
       <div id="eg-recent-table" style="display:none;margin-top:10px"></div>
+      <button onclick="toggleStreaks()" id="streaks-btn" style="padding:7px 16px;margin-top:8px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x1F4C8; Serie consecutive mercati</button>
+      <div id="streaks-box" style="display:none;margin-top:10px"></div>
     </div>
   </section>
 
@@ -853,6 +855,70 @@ async function loadRecentMatches(){
     h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">'+ms.length+' partite &#183; Gol &#8804;16\': <b style="color:#22c55e">'+eg16+'</b> ('+Math.round(eg16/ms.length*100)+'%)</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
+}
+
+// ââ Serie consecutive mercati per campionato (streaks) ââ
+var _streaksOpen=false,_streaksData=null,_streaksPeriod='FT';
+function toggleStreaks(){
+  var el=document.getElementById('streaks-box'),btn=document.getElementById('streaks-btn');
+  _streaksOpen=!_streaksOpen;
+  if(_streaksOpen){el.style.display='block';loadStreaks();btn.innerHTML='&#x25B2; Nascondi serie mercati';}
+  else{el.style.display='none';btn.innerHTML='&#x1F4C8; Serie consecutive mercati';}
+}
+async function loadStreaks(){
+  var full=document.getElementById('e-league').value;
+  var el=document.getElementById('streaks-box');
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Caricamento...</div>';
+  if(!full){el.innerHTML='<div style="color:#64748b;padding:10px">Seleziona un campionato.</div>';return;}
+  try{
+    var lr=await fetch('/api/leagues');var ll=await lr.json();
+    var arr=Array.isArray(ll)?ll:(ll.leagues||[]);
+    var lg=arr.find(function(x){return x.name===full;});
+    if(!lg){el.innerHTML='<div style="color:#64748b;padding:10px">Nessuno storico per questo campionato.</div>';return;}
+    var r=await fetch('/api/leagues/'+lg.id+'/streaks',{cache:'no-store'});
+    _streaksData=await r.json();_streaksPeriod='FT';
+    renderStreaks();
+  }catch(e){el.innerHTML='<div style="color:#ef4444">Errore: '+e.message+'</div>';}
+}
+function renderStreaks(){
+  var d=_streaksData;if(!d)return;
+  var el=document.getElementById('streaks-box');
+  var lab={FT:'Finale (FT)',HT:'1° Tempo (HT)',ST:'2° Tempo (ST)'};
+  var per=(d.periods&&d.periods[_streaksPeriod])||[];
+  var h='<div style="background:#3f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:#fecaca;line-height:1.5">';
+  h+='&#x26A0;&#xFE0F; <b>Niente fallacia del giocatore:</b> ogni partita è di squadre diverse e <b>indipendente</b> dalle altre. Una serie <b>NON</b> rende più probabile il contrario: la colonna <b>Prossima</b> è il <b>base rate</b> del campionato e <b>non dipende</b> dalla serie in corso. Non esiste il "è dovuto".';
+  h+='</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:10px">';
+  ['FT','HT','ST'].forEach(function(p){
+    var on=p===_streaksPeriod;
+    h+='<button onclick="_streaksPeriod=\''+p+'\';renderStreaks()" style="padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid #1d4ed8;'+(on?'background:#1d4ed8;color:#fff':'background:#0f172a;color:#93c5fd')+'">'+lab[p]+'</button>';
+  });
+  h+='</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">';
+  h+='<th style="padding:6px 10px;text-align:left">Mercato</th>';
+  h+='<th style="padding:6px 10px;text-align:center">Sì di fila<br><span style="font-weight:400;font-size:10px;opacity:.8">ora / record</span></th>';
+  h+='<th style="padding:6px 10px;text-align:center">No di fila<br><span style="font-weight:400;font-size:10px;opacity:.8">ora / record</span></th>';
+  h+='<th style="padding:6px 10px;text-align:center">Base rate</th>';
+  h+='<th style="padding:6px 10px;text-align:center">Prossima &#8776;</th>';
+  h+='</tr></thead><tbody>';
+  per.forEach(function(m,i){
+    var bg=i%2===0?'':'background:#0f172a;';
+    var posCur=m.cur_dir==='pos'?m.cur_len:0;
+    var negCur=m.cur_dir==='neg'?m.cur_len:0;
+    var posStyle=m.cur_dir==='pos'?'color:#22c55e;font-weight:800':'color:#475569';
+    var negStyle=m.cur_dir==='neg'?'color:#f87171;font-weight:800':'color:#475569';
+    var noPct=(100-m.base_rate).toFixed(1);
+    h+='<tr style="border-top:1px solid #1e293b;'+bg+'">';
+    h+='<td style="padding:5px 10px;font-weight:600;color:#e2e8f0">'+m.market+'</td>';
+    h+='<td style="padding:5px 10px;text-align:center;'+posStyle+'">'+posCur+' / '+m.max_pos+'</td>';
+    h+='<td style="padding:5px 10px;text-align:center;'+negStyle+'">'+negCur+' / '+m.max_neg+'</td>';
+    h+='<td style="padding:5px 10px;text-align:center;color:#cbd5e1">Sì '+m.base_rate+'%</td>';
+    h+='<td style="padding:5px 10px;text-align:center;color:#93c5fd">Sì '+m.base_rate+'% · No '+noPct+'%</td>';
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="margin-top:8px;font-size:11px;color:#64748b">'+lab[_streaksPeriod]+' · '+(d.matches||0)+' partite di storico · '+(d.name||'')+'</div>';
+  el.innerHTML=h;
 }
 
 </script>

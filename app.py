@@ -482,6 +482,76 @@ def api_league_detail(lid):
         'seasons': seasons,
     })
 
+@app.route('/api/leagues/<int:lid>/streaks')
+def api_league_streaks(lid):
+    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    if not info:
+        return jsonify({'error': 'Not found'}), 404
+    rows = query("""
+        SELECT ht_home, ht_away, st_home, st_away, ft_home, ft_away
+        FROM matches WHERE league_id=?
+        ORDER BY sort_date ASC, time_str ASC
+    """, (lid,))
+
+    MARKETS = ['1', 'X', '2', 'BTTS', 'Over 0.5', 'Over 1.5',
+               'Over 2.5', 'Over 3.5', 'Over 4.5']
+
+    def market_hits(h, a):
+        tot = h + a
+        return {
+            '1': h > a, 'X': h == a, '2': h < a,
+            'BTTS': h > 0 and a > 0,
+            'Over 0.5': tot > 0, 'Over 1.5': tot > 1, 'Over 2.5': tot > 2,
+            'Over 3.5': tot > 3, 'Over 4.5': tot > 4,
+        }
+
+    periods = {'FT': ('ft_home', 'ft_away'),
+               'HT': ('ht_home', 'ht_away'),
+               'ST': ('st_home', 'st_away')}
+
+    out = {}
+    for pkey, (kh, ka) in periods.items():
+        seqs = {mk: [] for mk in MARKETS}
+        for m in rows:
+            h, a = m[kh], m[ka]
+            if h is None or a is None:
+                continue
+            hh = market_hits(h, a)
+            for mk in MARKETS:
+                seqs[mk].append(1 if hh[mk] else 0)
+        pdata = []
+        for mk in MARKETS:
+            s = seqs[mk]
+            tot = len(s)
+            won = sum(s)
+            base = round(100.0 * won / tot, 1) if tot else 0.0
+            maxpos = maxneg = cp = cn = 0
+            for v in s:
+                if v:
+                    cp += 1
+                    cn = 0
+                    if cp > maxpos:
+                        maxpos = cp
+                else:
+                    cn += 1
+                    cp = 0
+                    if cn > maxneg:
+                        maxneg = cn
+            cur_dir, cur_len = None, 0
+            if s:
+                last = s[-1]
+                cur_dir = 'pos' if last else 'neg'
+                k = len(s) - 1
+                while k >= 0 and s[k] == last:
+                    cur_len += 1
+                    k -= 1
+            pdata.append({'market': mk, 'total': tot, 'base_rate': base,
+                          'max_pos': maxpos, 'max_neg': maxneg,
+                          'cur_dir': cur_dir, 'cur_len': cur_len})
+        out[pkey] = pdata
+    return jsonify({'id': lid, 'name': info[0]['name'],
+                    'matches': len(rows), 'periods': out})
+
 @app.route('/api/live')
 def api_live():
     with _lock:
