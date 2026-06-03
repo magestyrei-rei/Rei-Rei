@@ -1,0 +1,24 @@
+name: Live Early-Goal Tick (Match in Play + Telegram)
+
+# Ogni 5 minuti chiama /api/live-earlygoal-tick: aggiorna la lista delle partite
+# in corso col 1o gol <=16' (cache letta dal tab Match in Play) e invia la notifica
+# Telegram per le partite NUOVE (se TELEGRAM_TOKEN/TELEGRAM_CHAT_ID sono impostati
+# come env su Render). Sostituisce la notifica di n8n. Gratis (repo pubblico).
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  livetick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Tick live early-goal (+ Telegram)
+        env:
+          TICK_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
+        run: |
+          curl -fsSL --max-time 120 --retry 2 --retry-delay 8 \
+            "https://rei-rei.onrender.com/api/live-earlygoal-tick?token=${TICK_TOKEN}" | head -c 300 || true
+          echo

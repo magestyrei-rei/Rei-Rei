@@ -78,7 +78,18 @@
     <div class="tab" data-view="how">Come funziona</div>
      <div class="tab" data-view="pred">ð® Live Predizioni</div>
      <div class="tab" data-view="bets">&#x1F4D2; I miei investimenti</div>
+     <div class="tab" data-view="inplay">&#x26BD; Match in Play</div>
   </div>
+
+  <section class="view" id="view-inplay">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> tutte le partite <b>in corso adesso</b> nei tuoi campionati col <b>1&deg; gol entro il 16'</b> &mdash; campionato, risultato corrente, minuto. Si aggiorna ~ogni 5 min. Tienilo aperto mentre giochi: sostituisce la notifica.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <h3 style="margin:0;color:#f1f5f9;font-size:15px">&#x26BD; Partite in corso con early-goal</h3>
+      <button onclick="loadInPlay()" style="padding:5px 12px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:12px;cursor:pointer">&#x21bb; Aggiorna</button>
+      <span id="inplay-meta" style="font-size:11px;color:#64748b"></span>
+    </div>
+    <div id="inplay-table"><div style="color:#64748b;font-size:13px">Caricamento...</div></div>
+  </section>
 
   <section class="view" id="view-bets">
     <style>#view-bets select,#view-bets input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-bets label{display:block;margin-bottom:2px}</style>
@@ -429,6 +440,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view == "trend") { loadTrend(); refreshPredHistory(); loadServerPredictions(); }
      if (t.dataset.view === "pred") { loadPred(); startPredAutoRefresh(); } else { stopPredAutoRefresh(); }
     if (t.dataset.view === "bets") loadBets();
+    if (t.dataset.view === "inplay") { loadInPlay(); startInPlayRefresh(); } else { stopInPlayRefresh(); }
   });
 });
 
@@ -1120,6 +1132,36 @@ async function refreshBetList(){
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
+
+// === Match in Play (live early-goal) ===
+var _inplayTimer=null;
+async function loadInPlay(){
+  var el=document.getElementById('inplay-table'),meta=document.getElementById('inplay-meta');
+  try{
+    var r=await fetch('/api/live-earlygoal',{cache:'no-store'});var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">Errore: '+d.error+'</div>';return;}
+    var ms=d.matches||[];
+    if(meta){var ago=d.updated_ts?Math.max(0,Math.round(Date.now()/1000-d.updated_ts)/1):0;meta.textContent=d.updated_ts?('aggiornato '+(Math.round(ago/60)<=0?'ora':Math.round(ago/60)+' min fa')):'';}
+    if(!ms.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita in corso col 1&deg; gol entro il 16\' nei tuoi campionati in questo momento.</div>';return;}
+    var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#1d4ed8;color:#fff">'
+      +'<th style="padding:6px 10px;text-align:left">Campionato</th><th style="padding:6px 10px;text-align:left">Partita</th>'
+      +'<th style="padding:6px 10px;text-align:center">Risultato</th><th style="padding:6px 10px;text-align:center">Minuto</th><th style="padding:6px 10px;text-align:center">1&deg; gol</th></tr></thead><tbody>';
+    ms.forEach(function(m,i){
+      var bg=i%2?'background:#0f172a;':'';
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+'">'
+        +'<td style="padding:5px 10px;color:#94a3b8">'+(m.league||'')+'</td>'
+        +'<td style="padding:5px 10px;font-weight:500">'+(m.home||'?')+' <span style="color:#475569">vs</span> '+(m.away||'?')+'</td>'
+        +'<td style="padding:5px 10px;text-align:center;font-weight:700;color:#f0883e">'+(m.score||'')+'</td>'
+        +'<td style="padding:5px 10px;text-align:center;color:#22c55e;font-weight:700">'+(m.minute!=null?m.minute+"'":'-')+'</td>'
+        +'<td style="padding:5px 10px;text-align:center"><span style="color:#22c55e;font-weight:700">&#x26A1;'+m.first_goal_min+"'</span></td></tr>";
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:11px;color:#64748b">'+ms.length+' partite in corso &middot; refresh automatico ogni 60s</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function startInPlayRefresh(){ stopInPlayRefresh(); _inplayTimer=setInterval(loadInPlay,60000); }
+function stopInPlayRefresh(){ if(_inplayTimer){clearInterval(_inplayTimer);_inplayTimer=null;} }
 
 </script>
 </body>

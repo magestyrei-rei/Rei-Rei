@@ -630,6 +630,105 @@ def _settle_user_bets(limit=80):
             pass
     return settled
 
+# ---------- live early-goal (Match in Play + push Telegram, sostituisce n8n) ----------
+
+_LIVE_EG = {'ts': 0, 'matches': []}   # cache in-memory per il tab Match in Play
+_LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (fisso, cache)
+
+DDL_LIVE_SEEN = """
+CREATE TABLE IF NOT EXISTS live_alert_seen (
+  fixture_id INTEGER PRIMARY KEY,
+  ts INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+)
+""".strip()
+
+def _monitored_leagues():
+    try:
+        con = _sqlite3.connect(_LOCAL_DB)
+        ids = [r[0] for r in con.execute("SELECT DISTINCT league_id FROM matches").fetchall()]
+        con.close()
+        return set(ids)
+    except Exception:
+        return set()
+
+def _league_name(lid):
+    try:
+        con = _sqlite3.connect(_LOCAL_DB)
+        r = con.execute("SELECT name FROM leagues WHERE id=?", (lid,)).fetchone()
+        con.close()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+def _send_telegram(text):
+    import urllib.request as _u, urllib.parse as _up
+    token = os.getenv('TELEGRAM_TOKEN', '')
+    chat = os.getenv('TELEGRAM_CHAT_ID', '')
+    if not token or not chat:
+        return False
+    try:
+        body = _up.urlencode({'chat_id': chat, 'text': text, 'parse_mode': 'HTML',
+                              'disable_web_page_preview': 'true'}).encode()
+        req = _u.Request('https://api.telegram.org/bot' + token + '/sendMessage', data=body)
+        with _u.urlopen(req, timeout=15) as r:
+            return getattr(r, 'status', 200) == 200
+    except Exception:
+        return False
+
+def _refresh_live_eg(send_telegram=False):
+    monitored = _monitored_leagues()
+    resp = (_af_get('/fixtures', {'live': 'all'}) or {}).get('response') or []
+    out = []
+    for f in resp:
+        lg = f.get('league') or {}
+        lid = lg.get('id')
+        if lid not in monitored:
+            continue
+        g = f.get('goals') or {}
+        gh, ga = g.get('home'), g.get('away')
+        if (gh or 0) + (ga or 0) == 0:
+            continue
+        fid = (f.get('fixture') or {}).get('id')
+        if fid is None:
+            continue
+        fgm = _LIVE_FG.get(fid)
+        if fgm is None:
+            ev = (_af_get('/fixtures/events', {'fixture': fid}) or {}).get('response') or []
+            mins = [((e.get('time') or {}).get('elapsed') or 0) + ((e.get('time') or {}).get('extra') or 0)
+                    for e in ev if (e.get('type') or '') == 'Goal']
+            fgm = min(mins) if mins else 999
+            _LIVE_FG[fid] = fgm
+        if fgm > 16:
+            continue
+        teams = f.get('teams') or {}
+        out.append({
+            'fixture_id': fid,
+            'league': _league_name(lid) or lg.get('name'),
+            'home': (teams.get('home') or {}).get('name'),
+            'away': (teams.get('away') or {}).get('name'),
+            'score': '%s-%s' % (gh, ga),
+            'minute': ((f.get('fixture') or {}).get('status') or {}).get('elapsed'),
+            'first_goal_min': fgm,
+        })
+    out.sort(key=lambda e: (e.get('minute') or 0))
+    _LIVE_EG['ts'] = int(time.time())
+    _LIVE_EG['matches'] = out
+    sent = 0
+    if send_telegram and out:
+        try:
+            _turso_execute(DDL_LIVE_SEEN)
+            for e in out:
+                if _turso_select_rows("SELECT 1 FROM live_alert_seen WHERE fixture_id=?", [e['fixture_id']]):
+                    continue
+                msg = ("⚽ <b>EARLY GOAL</b> — 1° gol al %d'\n%s\n<b>%s</b> vs <b>%s</b>\nRisultato: %s  (%s')" %
+                       (e['first_goal_min'], e['league'], e['home'], e['away'], e['score'], e.get('minute') or '?'))
+                if _send_telegram(msg):
+                    _turso_execute("INSERT OR IGNORE INTO live_alert_seen (fixture_id) VALUES (?)", [e['fixture_id']])
+                    sent += 1
+        except Exception:
+            pass
+    return {'live_earlygoal': len(out), 'telegram_sent': sent}
+
 # ---------- routes ----------
 
 def register(app):
@@ -1224,3 +1323,26 @@ def register(app):
             return jsonify({'ok': True, 'result': ('WIN' if w else 'LOSS')})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-earlygoal-tick')
+    def api_live_eg_tick():
+        """Cron (ogni 5 min): aggiorna la lista live early-goal + invia Telegram per le nuove."""
+        token = request.args.get('token', '')
+        exp = os.getenv('TICK_AUTH_TOKEN', '')
+        if not exp or token != exp:
+            return jsonify({'error': 'unauthorized'}), 401
+        try:
+            return jsonify(_refresh_live_eg(send_telegram=True))
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-earlygoal')
+    def api_live_eg():
+        """Lista delle partite in corso col 1o gol <=16' (per il tab Match in Play).
+        Legge la cache; la rinfresca se piu' vecchia di 4 min (senza Telegram)."""
+        try:
+            if time.time() - _LIVE_EG.get('ts', 0) > 240:
+                _refresh_live_eg(send_telegram=False)
+            return jsonify({'matches': _LIVE_EG.get('matches', []), 'updated_ts': _LIVE_EG.get('ts', 0)})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300], 'matches': []}), 500
