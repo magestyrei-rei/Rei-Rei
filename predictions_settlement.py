@@ -1346,14 +1346,3 @@ def register(app):
             return jsonify({'matches': _LIVE_EG.get('matches', []), 'updated_ts': _LIVE_EG.get('ts', 0)})
         except Exception as e:
             return jsonify({'error': str(e)[:300], 'matches': []}), 500
-
-    @app.route('/api/telegram-test')
-    def api_telegram_test():
-        """TEMPORANEO: invia un messaggio Telegram di prova (nessun DB, nessuna partita).
-        Da rimuovere dopo la verifica."""
-        try:
-            ok = _send_telegram("\U0001F514 <b>Test Rei-Rei</b> — se ricevi questo, le notifiche early-goal funzionano! (messaggio di PROVA: nessuna partita reale, niente DB)")
-            return jsonify({'sent': ok,
-                            'hint': 'se sent=false controlla TELEGRAM_TOKEN e TELEGRAM_CHAT_ID su Render'})
-        except Exception as e:
-            return jsonify({'error': str(e)[:300]}), 500
