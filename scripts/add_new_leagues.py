@@ -8,6 +8,7 @@ Usage: python3 scripts/add_new_leagues.py <batch>
 """
 
 import gzip
+import os
 import shutil
 import sqlite3
 import sys
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-API_KEY = 'd440bc0c72f6ef65a024d6bb5483e965'
+API_KEY = os.environ.get('API_KEY', '')
 BASE    = 'https://v3.football.api-sports.io'
 SLEEP   = 1.3
 

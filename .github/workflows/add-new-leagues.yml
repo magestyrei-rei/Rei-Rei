@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Add new leagues
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
         run: python3 scripts/add_new_leagues.py ${{ inputs.batch }}
 
       - name: Commit DB
