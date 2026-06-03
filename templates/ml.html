@@ -82,6 +82,7 @@
 
   <section class="view" id="view-bets">
     <style>#view-bets select,#view-bets input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-bets label{display:block;margin-bottom:2px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> registra le tue giocate in diretta (mercato, minuto, punteggio, quota). Il sistema confronta la tua quota con la <b>base rate storica</b> del database e ti dice se hai <b>valore</b>.<br><b>Regola d'oro:</b> punta solo se la quota offerta &egrave; PI&Ugrave; ALTA della <b>quota equa</b> (= 1 &divide; base rate).<br><b>Esempio</b> &mdash; Over 1.5 sul 1-0 al 65' in Serie A &rarr; il DB dice <b>64%</b> (quota equa <b>1.56</b>):<br>&#x1F7E2; bookie a <b>1.60</b> &rarr; tua implicita 62,5% &rarr; <b>edge +1,5% = VALORE, conviene</b>.<br>&#x1F534; bookie a <b>1.50</b> &rarr; tua implicita 66,7% &rarr; <b>edge &minus;2,7% = NON conviene</b> (paghi troppo).<br>Edge verde = punta; edge rosso = lascia stare (registrala come <i>solo analisi</i> per verificare se fai bene a evitarla).</div>
     <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:14px;margin-bottom:14px">
       <h3 style="margin:0 0 10px;color:#f1f5f9;font-size:15px">&#x1F4DD; Registra una giocata (in diretta, quota d'ingresso)</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
@@ -115,6 +116,7 @@
   </section>
 
   <section class="view active" id="view-live">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> scegli campionato, minuto e punteggio attuale &rarr; vedi la probabilit&agrave; di ogni mercato per il <b>resto</b> della partita (modello Poisson). Confrontala con la quota live: se il bookie offre <b>pi&ugrave; della quota equa</b> (= 1 &divide; probabilit&agrave;) hai valore. <b>Es.:</b> Over 2.5 dato al 55% &rarr; quota equa 1.82; se il bookie la d&agrave; a 2.00 &rarr; valore.</div>
     <div class="controls">
       <div>
         <label>Campionato</label>
@@ -157,6 +159,7 @@
   </section>
 
   <section class="view" id="view-eg">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> vista <i>legacy</i> del vecchio sistema early-goal, tenuta solo per riferimento. Per i dati aggiornati usa la <b>Home</b> (ultime 30 partite) o il tab <b>Live</b>.</div>
     <div class="controls">
       <div>
         <label>Campionato</label>
@@ -191,6 +194,7 @@
   </section>
 
   <section class="view" id="view-picks">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> qui il <b>modello ML</b> elenca da solo le sue giocate di valore sulle partite live (dove la sua probabilit&agrave; supera la quota). Premi <b>Aggiorna</b>. Sono suggerimenti automatici del modello &mdash; verifica quanto ci azzecca davvero nel tab <b>ML Accuracy</b> prima di fidarti.</div>
     <div class="controls">
       <div><label>Capitale (EUR)</label><input type="number" id="p-cap" value="1000" min="0" step="50"></div>
       <div><label>Frazione Kelly</label><input type="number" id="p-kly" value="0.25" min="0" max="1" step="0.05"></div>
@@ -203,6 +207,7 @@
   </section>
 
   <section class="view" id="view-acc">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> mostra quanto ci ha azzeccato il modello (WIN/LOSS reali) per mercato e per campionato. Serve a capire <b>di quali previsioni fidarti</b>: un mercato con alta % <b>su tante partite</b> &egrave; affidabile; uno con pochi casi &egrave; ancora rumore. Guarda sempre il <b>numero di partite</b>, non solo la percentuale.</div>
     <div class="cards" id="a-kpis"></div>
     <div id="a-cal" style="display:none;margin-top:14px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px"><h3 style="margin:0 0 8px;color:#f1f5f9;font-size:14px">Calibrazione Poisson</h3><div id="a-cal-body" style="font-size:13px;color:#94a3b8"></div></div>
     <div style="margin-top:14px"><h3 style="margin:0 0 8px;color:#f1f5f9;font-size:14px">Top leghe per fixture settlate</h3><div id="a-bl"></div></div>
@@ -211,6 +216,7 @@
   </section>
 
   <section class="view" id="view-trend">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> la <b>curva di apprendimento</b> del modello nel tempo + le ultime 30 predizioni con esito. Se l'accuratezza cumulativa sale e si stabilizza sopra il punto di pareggio, il modello sta migliorando. Filtra per mercato/campionato per vedere <b>dove</b> va meglio.</div>
   <h2>📈 Curva di Apprendimento ML</h2>
   <div class="trend-filters">
     <div class="filter-group"><label>Campionato</label>
@@ -244,6 +250,7 @@
   </div>
 </section>
 <section class="view" id="view-how">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; Questa &egrave; la <b>guida generale</b> al modello ML. Ogni altro tab ha in cima il suo box "Come si usa" specifico.</div>
     <div class="notes" style="line-height:1.7;font-size:13px">
       <h2 style="margin:0 0 14px;color:#f1f5f9;font-size:18px">Come funziona il ML Predictor</h2>
       <h3 style="margin:14px 0 8px;color:#38bdf8;font-size:14px">Tab "Live (minuto + score)"</h3>
@@ -305,6 +312,7 @@
     </div>
   </section>
    <section class="view" id="view-pred">
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> predizioni live in tempo reale, con timer da 5 min che si aggiorna da solo. &Egrave; la "vista del momento"; lo <b>storico</b> vero delle predizioni con esito sta nel tab <b>Trend ML</b> (Ultime 30 predizioni).</div>
      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
        <div id="pred-status" style="color:#94a3b8;font-size:13px;flex:1">Caricamento...</div>
        <button onclick="loadPred();startPredAutoRefresh();" style="padding:6px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:13px;cursor:pointer">&#x21bb; Aggiorna</button><span id="pred-auto-cd" style="font-size:11px;color:#94a3b8;margin-left:10px;font-variant-numeric:tabular-nums"></span>
