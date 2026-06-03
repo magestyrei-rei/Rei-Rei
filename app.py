@@ -788,6 +788,123 @@ def api_ingest():
     return jsonify({"ok": True, "inserted": True,
                     "match": f"{home_team} {ft_home}-{ft_away} {away_team}"})
 
+@app.route("/api/earlygoal-sync")
+def api_earlygoal_sync():
+    """Archiviatore: prende le partite finite di recente (ultimi 2 giorni) dei
+    campionati monitorati, filtra il 1o gol <=16', le inserisce nel DB vivo
+    (display istantaneo) e ne restituisce le righe gol-16min per la persistenza
+    su data/. Protetto con TICK_AUTH_TOKEN (riusa il segreto del cron esistente)."""
+    import urllib.request as _u, urllib.parse as _up, datetime as _dt
+    tok = request.args.get("token", "")
+    expected = os.environ.get("TICK_AUTH_TOKEN", "")
+    if not expected or tok != expected:
+        return jsonify({"error": "unauthorized"}), 401
+    key = os.environ.get("APISPORTS_KEY", "")
+    if not key:
+        return jsonify({"error": "APISPORTS_KEY not set"}), 500
+
+    def _af(path, params):
+        url = "https://v3.football.api-sports.io" + path + "?" + _up.urlencode(params)
+        req = _u.Request(url, headers={"x-apisports-key": key})
+        try:
+            with _u.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return {"response": []}
+
+    monitored = set(r["id"] for r in query("SELECT id FROM leagues"))
+    names = {r["id"]: r["name"] for r in query("SELECT id, name FROM leagues")}
+    today = _dt.datetime.utcnow().date()
+    dates = [(today - _dt.timedelta(days=d)).strftime("%Y-%m-%d") for d in (0, 1)]
+
+    added = []
+    checked = 0
+    seen = set()
+    for ds_api in dates:
+        for f in _af("/fixtures", {"date": ds_api}).get("response", []):
+            lg = f.get("league") or {}
+            lid = lg.get("id")
+            if lid not in monitored:
+                continue
+            st = ((f.get("fixture") or {}).get("status") or {}).get("short")
+            if st not in ("FT", "AET", "PEN"):
+                continue
+            g = f.get("goals") or {}
+            fth, fta = g.get("home"), g.get("away")
+            if fth is None or fta is None or (fth + fta) == 0:
+                continue
+            fid = (f.get("fixture") or {}).get("id")
+            if fid in seen:
+                continue
+            seen.add(fid)
+            teams = f.get("teams") or {}
+            home = (teams.get("home") or {}).get("name")
+            away = (teams.get("away") or {}).get("name")
+            htid = (teams.get("home") or {}).get("id")
+            dd = (f.get("fixture") or {}).get("date") or ""
+            if len(dd) < 10:
+                continue
+            date_disp = "%s/%s/%s" % (dd[8:10], dd[5:7], dd[0:4])
+            if query("SELECT 1 FROM matches WHERE league_id=? AND date_str=? AND home_team=? AND away_team=? LIMIT 1",
+                     (lid, date_disp, home, away)):
+                continue
+            checked += 1
+            ev = _af("/fixtures/events", {"fixture": fid}).get("response", [])
+            goals = []
+            for e in ev:
+                if e.get("type") != "Goal":
+                    continue
+                t = e.get("time") or {}
+                goals.append(((t.get("elapsed") or 0), (t.get("extra") or 0), (e.get("team") or {}).get("id")))
+            goals.sort(key=lambda x: x[0] + x[1])
+            if not goals or (goals[0][0] + goals[0][1]) > 16:
+                continue
+            sc = (f.get("score") or {}).get("halftime") or {}
+            hh, ha = sc.get("home") or 0, sc.get("away") or 0
+            st_h, st_a = fth - hh, fta - ha
+            total = fth + fta
+            btts = 1 if (fth > 0 and fta > 0) else 0
+            result = "H" if fth > fta else ("D" if fth == fta else "A")
+            fgt = "home" if goals[0][2] == htid else "away"
+            fg_min = goals[0][0] + goals[0][1]
+            fg_result = _fg_result_ingest(fgt, fth, fta)
+
+            def _mm(m, x):
+                return (str(m) + "+" + str(x)) if x else str(m)
+            gcell = ", ".join(('<span class="away-goal">' + _mm(m, x) + "'</span>") if t != htid else (_mm(m, x) + "'")
+                              for m, x, t in goals)
+            goals_text = ", ".join((_mm(m, x) + "'") for m, x, t in goals)
+            season = lg.get("season") or int(dd[0:4] or 0)
+            time_str = dd[11:16] if len(dd) >= 16 else ""
+            try:
+                sort_date = _dt.datetime.strptime(date_disp + " " + (time_str or "00:00"),
+                                                  "%d/%m/%Y %H:%M").strftime("%Y%m%d%H%M")
+            except Exception:
+                sort_date = dd[0:4] + dd[5:7] + dd[8:10] + "0000"
+            lname = names.get(lid) or ((lg.get("country") or "") + " - " + (lg.get("name") or ""))
+            if lid not in monitored:
+                try:
+                    execute("INSERT OR IGNORE INTO leagues (id, name) VALUES (?,?)", (lid, lname))
+                except Exception:
+                    pass
+            try:
+                execute("""INSERT INTO matches (fixture_id, league_id, season, date_str, sort_date, time_str,
+                    home_team, away_team, ht_home, ht_away, st_home, st_away, ft_home, ft_away,
+                    total_goals, ht_goals, st_goals, btts, result, goals_html, goals_text,
+                    first_goal_min, first_goal_team, fg_result, is_archived)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                    (fid, lid, season, date_disp, sort_date, time_str, home, away, hh, ha, st_h, st_a,
+                     fth, fta, total, hh + ha, st_h + st_a, btts, result, gcell, goals_text,
+                     fg_min, fgt, fg_result))
+            except Exception:
+                continue
+            row = ("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+                   "<td>%d-%d</td><td>%d-%d</td><td>%d-%d</td><td>%s</td><td>-</td><td>-</td><td>-</td></tr>") % (
+                   season, date_disp, time_str, home, away, lname, hh, ha, st_h, st_a, fth, fta, gcell)
+            added.append({"league_id": lid, "row": row,
+                          "label": "%s %d-%d %s (%s, 1o gol %d')" % (home, fth, fta, away, lname, fg_min)})
+    return jsonify({"ok": True, "checked": checked, "added": len(added), "matches": added})
+
 @app.route("/api/admin/delete-fixture", methods=["DELETE"])
 def admin_delete_fixture():
     expected_token = os.environ.get("INGEST_TOKEN", "")

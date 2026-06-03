@@ -1,0 +1,47 @@
+name: Archive Early-Goal Tick
+
+# Ogni 5 minuti: chiama /api/earlygoal-sync che (1) inserisce le nuove partite
+# early-goal nel DB vivo di Render -> display ISTANTANEO, e (2) restituisce le
+# righe gol-16min. Lo script le scrive su data/ (persistenza). Il commit e' fatto
+# col GITHUB_TOKEN -> NON innesca rebuild-db/deploy (anti-loop). La cottura nel
+# football.db.gz permanente la fa rebuild-db.yml schedulato ogni 6h.
+# Sostituisce il Tracker n8n (inaffidabile per il limite esecuzioni).
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Sync early-goal (ingest istantaneo + righe per data/)
+        env:
+          TICK_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
+        run: |
+          curl -fsSL --max-time 175 --retry 2 --retry-delay 10 \
+            "https://rei-rei.onrender.com/api/earlygoal-sync?token=${TICK_TOKEN}" -o sync.json \
+            || echo '{"matches":[]}' > sync.json
+          head -c 500 sync.json; echo
+      - name: Scrivi su data/ e committa (no deploy)
+        run: |
+          python scripts/archive_write.py sync.json
+          rm -f sync.json
+          if [ -n "$(git status --porcelain data/)" ]; then
+            git config user.name "rei-rei-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/
+            git commit -m "archive: nuove partite early-goal (auto, no deploy)"
+            git push
+          else
+            echo "nessuna nuova partita da committare"
+          fi

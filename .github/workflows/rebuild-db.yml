@@ -9,6 +9,11 @@ on:
     branches: [main]
     paths:
       - 'data/**'
+  schedule:
+    # Ogni 6h: cuoce nel football.db.gz permanente le partite che archive-tick
+    # ha scritto in data/ (i suoi commit col GITHUB_TOKEN non innescano questo
+    # workflow, percio' serve la schedulazione) + deploy.
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 permissions:
