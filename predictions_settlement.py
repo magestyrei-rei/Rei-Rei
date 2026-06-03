@@ -1346,3 +1346,64 @@ def register(app):
             return jsonify({'matches': _LIVE_EG.get('matches', []), 'updated_ts': _LIVE_EG.get('ts', 0)})
         except Exception as e:
             return jsonify({'error': str(e)[:300], 'matches': []}), 500
+
+    @app.route('/api/segments')
+    def api_segments():
+        """Base rate di un mercato, per campionato, spezzata per STATO al minuto
+        (es. 1-0, 0-1 = anche chi ha segnato il 1o gol), con n e quota equa.
+        Serve a trovare le nicchie piu' affidabili."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            minute = int(request.args.get('minute') or 65)
+            market = (request.args.get('market') or 'over_1_5').strip()
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+            con = _sqlite3.connect(_LOCAL_DB)
+            con.row_factory = _sqlite3.Row
+            rows = con.execute(
+                "SELECT goals_html, goals_text, ft_home, ft_away FROM matches WHERE league_id=?",
+                (lid,)).fetchall()
+            con.close()
+            groups = {}
+            for r in rows:
+                fh, fa = r['ft_home'], r['ft_away']
+                if fh is None or fa is None:
+                    continue
+                tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                if any(aw is None for (mn, aw) in tl if mn <= minute):
+                    continue
+                hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+                aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+                totM = hM + aM
+                if market in OVER:
+                    thr = OVER[market]
+                    if totM >= thr:
+                        continue
+                    win = (fh + fa) >= thr
+                elif market == 'btts_si':
+                    if hM > 0 and aM > 0:
+                        continue
+                    win = (fh > 0 and fa > 0)
+                elif market == 'btts_no':
+                    if hM > 0 and aM > 0:
+                        continue
+                    win = not (fh > 0 and fa > 0)
+                elif market in ('1', 'X', '2'):
+                    win = {'1': fh > fa, 'X': fh == fa, '2': fa > fh}[market]
+                else:
+                    continue
+                st = "%d-%d" % (hM, aM)
+                g = groups.setdefault(st, [0, 0])
+                g[0] += 1
+                if win:
+                    g[1] += 1
+            out = []
+            for st, (n, w) in groups.items():
+                br = round(100.0 * w / n, 1) if n else 0.0
+                out.append({'state': st, 'n': n, 'wins': w, 'base_rate': br,
+                            'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
+            out.sort(key=lambda x: -x['n'])
+            return jsonify({'league_id': lid, 'minute': minute, 'market': market, 'segments': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500

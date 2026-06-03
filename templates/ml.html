@@ -79,7 +79,25 @@
      <div class="tab" data-view="pred">ð® Live Predizioni</div>
      <div class="tab" data-view="bets">&#x1F4D2; I miei investimenti</div>
      <div class="tab" data-view="inplay">&#x26BD; Match in Play</div>
+     <div class="tab" data-view="seg">&#x1F50E; Segmenti</div>
   </div>
+
+  <section class="view" id="view-seg">
+    <style>#view-seg select,#view-seg input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> scegli campionato + minuto + mercato &rarr; per ogni <b>stato</b> (es. 1-0, 0-1 = anche chi ha segnato il 1&deg; gol) vedi quanto spesso il mercato si verifica storicamente (<b>base rate</b>), su quante partite (<b>n</b>) e la <b>quota equa</b>. Cerca le <b>nicchie affidabili</b>: n alto + base rate alta.<br><b>&#x2705; Quando INVESTIRE (esempio):</b> Over 1.5, 65', stato <b>0-1</b> &rarr; 67% (n=180) &rarr; quota equa <b>1.49</b>. Il bookie offre <b>1.60</b> &rarr; tua implicita 62,5% &lt; 67% &rarr; <b>edge +4,5% = VALORE</b>.<br><b>&#x274C; Quando NON investire (esempio):</b> stesso mercato, stato <b>1-0</b> &rarr; 62% (n=210) &rarr; quota equa <b>1.61</b>. Il bookie offre <b>1.50</b> &rarr; implicita 66,7% &gt; 62% &rarr; <b>edge negativo, lascia stare</b>. E se <b>n&lt;50</b> salta sempre (campione troppo piccolo).</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="seg-league" style="min-width:180px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto</label><input type="number" id="seg-minute" value="65" min="0" max="120" style="width:70px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="seg-market">
+        <option value="over_0_5">Over 0.5</option><option value="over_1_5" selected>Over 1.5</option>
+        <option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
+        <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
+        <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
+      </select></div>
+      <button onclick="loadSegments()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
+    </div>
+    <div id="seg-table"><div style="color:#64748b;font-size:13px">Scegli i parametri e premi Calcola.</div></div>
+  </section>
 
   <section class="view" id="view-inplay">
     <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> tutte le partite <b>in corso adesso</b> nei tuoi campionati col <b>1&deg; gol entro il 16'</b> &mdash; campionato, risultato corrente, minuto. Si aggiorna ~ogni 5 min. Tienilo aperto mentre giochi: sostituisce la notifica.</div>
@@ -441,6 +459,7 @@ document.querySelectorAll(".tab").forEach(function(t){
      if (t.dataset.view === "pred") { loadPred(); startPredAutoRefresh(); } else { stopPredAutoRefresh(); }
     if (t.dataset.view === "bets") loadBets();
     if (t.dataset.view === "inplay") { loadInPlay(); startInPlayRefresh(); } else { stopInPlayRefresh(); }
+    if (t.dataset.view === "seg") loadSegInit();
   });
 });
 
@@ -1162,6 +1181,54 @@ async function loadInPlay(){
 }
 function startInPlayRefresh(){ stopInPlayRefresh(); _inplayTimer=setInterval(loadInPlay,60000); }
 function stopInPlayRefresh(){ if(_inplayTimer){clearInterval(_inplayTimer);_inplayTimer=null;} }
+
+// === Segmenti / Nicchie ===
+var _segLeaguesLoaded=false;
+async function loadSegInit(){
+  if(_segLeaguesLoaded){return;}
+  _segLeaguesLoaded=true;
+  try{
+    var r=await fetch('/api/leagues');var d=await r.json();
+    var arr=Array.isArray(d)?d:(d.leagues||[]);
+    arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+    var sel=document.getElementById('seg-league');
+    arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+  }catch(e){}
+}
+async function loadSegments(){
+  var el=document.getElementById('seg-table');
+  var lid=document.getElementById('seg-league').value;
+  var minute=document.getElementById('seg-minute').value||'65';
+  var market=document.getElementById('seg-market').value;
+  if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  try{
+    var r=await fetch('/api/segments?league='+lid+'&minute='+minute+'&market='+market);var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    var segs=d.segments||[];
+    if(!segs.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuno stato aperto per questo mercato a questo minuto (forse il mercato &egrave; gi&agrave; deciso prima).</div>';return;}
+    var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+      +'<th style="padding:7px 12px;text-align:left">Stato al '+minute+"'</th>"
+      +'<th style="padding:7px 12px;text-align:center">Base rate</th>'
+      +'<th style="padding:7px 12px;text-align:center">Quota equa</th>'
+      +'<th style="padding:7px 12px;text-align:center">n (campione)</th>'
+      +'<th style="padding:7px 12px;text-align:center">Affidabilit&agrave;</th></tr></thead><tbody>';
+    segs.forEach(function(s,i){
+      var bg=i%2?'background:#0f172a;':'';
+      var weak=s.n<50;
+      var rel=weak?'<span style="color:#f59e0b">&#x26A0; pochi dati</span>':'<span style="color:#22c55e">ok</span>';
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+(weak?'opacity:.55;':'')+'">'
+        +'<td style="padding:6px 12px;font-weight:600;color:#e2e8f0">'+s.state+'</td>'
+        +'<td style="padding:6px 12px;text-align:center;font-weight:700;color:#93c5fd">'+s.base_rate+'%</td>'
+        +'<td style="padding:6px 12px;text-align:center;font-weight:700">'+(s.fair_odds||'-')+'</td>'
+        +'<td style="padding:6px 12px;text-align:center;color:#94a3b8">'+s.n+'</td>'
+        +'<td style="padding:6px 12px;text-align:center">'+rel+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">La <b>quota equa</b> &egrave; il break-even: <b>investi solo se la quota del bookie &egrave; PI&Ugrave; ALTA</b>. Ignora le righe con n&lt;50 (rumore statistico).</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
 
 </script>
 </body>
