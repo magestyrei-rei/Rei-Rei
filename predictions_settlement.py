@@ -696,8 +696,11 @@ def _refresh_live_eg(send_telegram=False):
             ev = (_af_get('/fixtures/events', {'fixture': fid}) or {}).get('response') or []
             mins = [((e.get('time') or {}).get('elapsed') or 0) + ((e.get('time') or {}).get('extra') or 0)
                     for e in ev if (e.get('type') or '') == 'Goal']
-            fgm = min(mins) if mins else 999
-            _LIVE_FG[fid] = fgm
+            if mins:
+                fgm = min(mins)
+                _LIVE_FG[fid] = fgm   # cache solo il minuto reale
+            else:
+                fgm = 999             # eventi non ancora disponibili: NON cachare, ricontrolla al prossimo tick
         if fgm > 16:
             continue
         teams = f.get('teams') or {}
@@ -1327,7 +1330,7 @@ def register(app):
     @app.route('/api/live-earlygoal-tick')
     def api_live_eg_tick():
         """Cron (ogni 5 min): aggiorna la lista live early-goal + invia Telegram per le nuove."""
-        token = request.args.get('token', '')
+        token = request.args.get('token', '') or request.headers.get('X-Tick-Token', '')
         exp = os.getenv('TICK_AUTH_TOKEN', '')
         if not exp or token != exp:
             return jsonify({'error': 'unauthorized'}), 401

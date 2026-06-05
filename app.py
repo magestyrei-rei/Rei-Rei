@@ -795,7 +795,7 @@ def api_earlygoal_sync():
     (display istantaneo) e ne restituisce le righe gol-16min per la persistenza
     su data/. Protetto con TICK_AUTH_TOKEN (riusa il segreto del cron esistente)."""
     import urllib.request as _u, urllib.parse as _up, datetime as _dt
-    tok = request.args.get("token", "")
+    tok = request.args.get("token", "") or request.headers.get("X-Tick-Token", "")
     expected = os.environ.get("TICK_AUTH_TOKEN", "")
     if not expected or tok != expected:
         return jsonify({"error": "unauthorized"}), 401
