@@ -820,6 +820,19 @@ def api_earlygoal_sync():
     added = []
     checked = 0
     seen = set()
+    # cache "gia' controllate e NON early-goal": senza questa, le partite finite che
+    # non passano il filtro (1o gol >16') non vengono mai salvate -> ad ogni run si
+    # rifarebbe /fixtures/events per ognuna; girando ogni 10 min nei picchi il costo
+    # api esplode. Qui le ricordiamo cosi' l'events si chiama 1 volta sola per partita.
+    try:
+        execute("CREATE TABLE IF NOT EXISTS eg_sync_skip (fixture_id INTEGER PRIMARY KEY, ts INTEGER)")
+        execute("DELETE FROM eg_sync_skip WHERE ts < ?", (int(time.time()) - 3 * 86400,))
+    except Exception:
+        pass
+    try:
+        skip = set(r["fixture_id"] for r in query("SELECT fixture_id FROM eg_sync_skip"))
+    except Exception:
+        skip = set()
     for ds_api in dates:
         for f in _af("/fixtures", {"date": ds_api}).get("response", []):
             lg = f.get("league") or {}
@@ -834,7 +847,7 @@ def api_earlygoal_sync():
             if fth is None or fta is None or (fth + fta) == 0:
                 continue
             fid = (f.get("fixture") or {}).get("id")
-            if fid in seen:
+            if fid in seen or fid in skip:
                 continue
             seen.add(fid)
             teams = f.get("teams") or {}
@@ -858,6 +871,13 @@ def api_earlygoal_sync():
                 goals.append(((t.get("elapsed") or 0), (t.get("extra") or 0), (e.get("team") or {}).get("id")))
             goals.sort(key=lambda x: x[0] + x[1])
             if not goals or (goals[0][0] + goals[0][1]) > 16:
+                # finita ma non early-goal: ricordala per non rifare events ai prossimi run
+                try:
+                    execute("INSERT OR IGNORE INTO eg_sync_skip (fixture_id, ts) VALUES (?, ?)",
+                            (fid, int(time.time())))
+                except Exception:
+                    pass
+                skip.add(fid)
                 continue
             sc = (f.get("score") or {}).get("halftime") or {}
             hh, ha = sc.get("home") or 0, sc.get("away") or 0
