@@ -81,7 +81,32 @@
      <div class="tab" data-view="inplay">&#x26BD; Match in Play</div>
      <div class="tab" data-view="seg">&#x1F50E; Segmenti</div>
      <div class="tab" data-view="read">&#x1F3AF; Lettura Live</div>
+     <div class="tab" data-view="scan">&#x1F9ED; Scanner</div>
   </div>
+
+  <section class="view" id="view-scan">
+    <style>#view-scan select,#view-scan input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4A1; <b>Come si usa:</b> lo Scanner risponde a &laquo;in quali campionati e stati il mio niche rende di pi&ugrave;?&raquo;. Scegli <b>minuto</b> + <b>mercato</b> (e se vuoi uno <b>stato</b> preciso) e premi <b>Scansiona</b>: scorre <b>tutti i campionati</b> e classifica le combinazioni <b>campionato &times; stato</b> dal base rate pi&ugrave; alto, con n e quota equa.<br><b>A cosa serve:</b> sapere <b>dove concentrarti</b>. Quando arriva una notifica da un campionato+stato in cima alla lista, sai che &egrave; un terreno storicamente forte.<br>&#x26A0; <b>Nota:</b> ordina per <b>quanto spesso accade</b> (probabilit&agrave; alta + n affidabile), <b>non</b> per edge garantito &mdash; l&#39;edge dipende dalla quota live, che confermi poi in <b>Lettura Live</b>. Ignora le righe con n basso (alza il filtro &laquo;n minimo&raquo;).</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto</label><input type="number" id="scan-minute" value="65" min="0" max="120" style="width:64px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="scan-market">
+        <option value="over_1_5" selected>Over 1.5</option><option value="over_2_5">Over 2.5</option>
+        <option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
+        <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
+        <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
+      </select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Stato</label><select id="scan-state">
+        <option value="">Tutti</option>
+        <option value="1-0">1-0 (casa)</option><option value="0-1">0-1 (ospite)</option>
+        <option value="1-1">1-1</option><option value="2-0">2-0</option><option value="0-2">0-2</option>
+        <option value="2-1">2-1</option><option value="1-2">1-2</option>
+      </select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">n minimo</label><select id="scan-minn">
+        <option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select></div>
+      <button onclick="loadScanner()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Scansiona</button>
+    </div>
+    <div id="scan-table"><div style="color:#64748b;font-size:13px">Imposta i filtri e premi Scansiona.</div></div>
+  </section>
 
   <section class="view" id="view-read">
     <style>#view-read select,#view-read input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
@@ -493,6 +518,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "inplay") { loadInPlay(); startInPlayRefresh(); } else { stopInPlayRefresh(); }
     if (t.dataset.view === "seg") loadSegInit();
     if (t.dataset.view === "read") loadReadInit();
+    if (t.dataset.view === "scan") loadScannerInit();
   });
 });
 
@@ -1347,6 +1373,46 @@ function calcEdge(inp, baseRate){
   var edge=baseRate-(100.0/q);
   cell.textContent=(edge>=0?'+':'')+edge.toFixed(1)+'%';
   cell.style.color=edge>=0?'#22c55e':'#f87171';
+}
+
+// === Scanner nicchie (tutti i campionati) ===
+function loadScannerInit(){ /* nessun pre-caricamento necessario */ }
+async function loadScanner(){
+  var el=document.getElementById('scan-table');
+  var mn=document.getElementById('scan-minute').value||'65';
+  var market=document.getElementById('scan-market').value;
+  var state=document.getElementById('scan-state').value;
+  var minn=document.getElementById('scan-minn').value||'50';
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Scansione di tutti i campionati... (qualche secondo)</div>';
+  try{
+    var u='/api/scanner?minute='+mn+'&market='+market+'&min_n='+minn+(state?('&state='+encodeURIComponent(state)):'');
+    var r=await fetch(u);var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    var rows=d.rows||[];
+    if(!rows.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna combinazione con n&ge;'+minn+' per questo filtro.</div>';return;}
+    var h='<div style="margin-bottom:6px;font-size:12px;color:#94a3b8">'+rows.length+' combinazioni (campionato &times; stato) ordinate per base rate &mdash; minuto '+mn+", mercato "+market+'</div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+      +'<th style="padding:7px 8px;text-align:center">#</th>'
+      +'<th style="padding:7px 10px;text-align:left">Campionato</th>'
+      +'<th style="padding:7px 8px;text-align:center">Stato</th>'
+      +'<th style="padding:7px 8px;text-align:center">Base rate</th>'
+      +'<th style="padding:7px 8px;text-align:center">Quota equa</th>'
+      +'<th style="padding:7px 8px;text-align:center">n</th></tr></thead><tbody>';
+    rows.forEach(function(s,i){
+      var bg=i%2?'background:#0f172a;':'';
+      var col=i<3?'color:#22c55e;font-weight:800':'color:#93c5fd;font-weight:700';
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+'">'
+        +'<td style="padding:6px 8px;text-align:center;color:#64748b">'+(i+1)+'</td>'
+        +'<td style="padding:6px 10px;color:#e2e8f0">'+s.league+'</td>'
+        +'<td style="padding:6px 8px;text-align:center;font-weight:600">'+s.state+'</td>'
+        +'<td style="padding:6px 8px;text-align:center;'+col+'">'+s.base_rate+'%</td>'
+        +'<td style="padding:6px 8px;text-align:center;font-weight:600">'+(s.fair_odds||'-')+'</td>'
+        +'<td style="padding:6px 8px;text-align:center;color:#94a3b8">'+s.n+'</td></tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Questi sono i tuoi <b>terreni di caccia</b> migliori (dove il mercato accade pi&ugrave; spesso con dati affidabili). L&#39;edge vero per&ograve; dipende dalla quota live &mdash; confermala in <b>Lettura Live</b> prima di puntare.</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
 
 </script>

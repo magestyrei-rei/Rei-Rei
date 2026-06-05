@@ -633,6 +633,7 @@ def _settle_user_bets(limit=80):
 # ---------- live early-goal (Match in Play + push Telegram, sostituisce n8n) ----------
 
 _LIVE_EG = {'ts': 0, 'matches': []}   # cache in-memory per il tab Match in Play
+_SCANNER_CACHE = {}   # cache scanner nicchie: (minute, market) -> (ts, full_rows)
 _LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (fisso, cache)
 
 DDL_LIVE_SEEN = """
@@ -1445,5 +1446,77 @@ def register(app):
             out.sort(key=lambda x: -x['base_rate'])
             return jsonify({'league_id': lid, 'minute': minute, 'state': '%d-%d' % (sh, sa),
                             'total': total, 'markets': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/scanner')
+    def api_scanner():
+        """Scanner nicchie: per un minuto + mercato, scorre TUTTI i campionati e
+        classifica le combinazioni (campionato x stato) col base rate piu' alto,
+        cosi' vedi DOVE storicamente il niche rende di piu'. Filtrabile per stato/n.
+        Cache 10 min per (minuto, mercato): i filtri stato/n sono istantanei."""
+        try:
+            minute = int(request.args.get('minute') or 65)
+            market = (request.args.get('market') or 'over_1_5').strip()
+            state_filter = (request.args.get('state') or '').strip()
+            min_n = int(request.args.get('min_n') or 50)
+            ckey = (minute, market)
+            now = time.time()
+            cached = _SCANNER_CACHE.get(ckey)
+            if cached and now - cached[0] < 600:
+                full = cached[1]
+            else:
+                OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+                con = _sqlite3.connect(_LOCAL_DB)
+                con.row_factory = _sqlite3.Row
+                rows = con.execute(
+                    "SELECT league_id, goals_html, goals_text, ft_home, ft_away FROM matches").fetchall()
+                names = {r['id']: r['name'] for r in con.execute("SELECT id, name FROM leagues")}
+                con.close()
+                groups = {}
+                for r in rows:
+                    fh, fa = r['ft_home'], r['ft_away']
+                    if fh is None or fa is None:
+                        continue
+                    tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                    if any(aw is None for (mn, aw) in tl if mn <= minute):
+                        continue
+                    hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+                    aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+                    totM = hM + aM
+                    if market in OVER:
+                        thr = OVER[market]
+                        if totM >= thr:
+                            continue
+                        win = (fh + fa) >= thr
+                    elif market == 'btts_si':
+                        if hM > 0 and aM > 0:
+                            continue
+                        win = (fh > 0 and fa > 0)
+                    elif market == 'btts_no':
+                        if hM > 0 and aM > 0:
+                            continue
+                        win = not (fh > 0 and fa > 0)
+                    elif market in ('1', 'X', '2'):
+                        win = {'1': fh > fa, 'X': fh == fa, '2': fa > fh}[market]
+                    else:
+                        continue
+                    key = (r['league_id'], "%d-%d" % (hM, aM))
+                    g = groups.setdefault(key, [0, 0])
+                    g[0] += 1
+                    if win:
+                        g[1] += 1
+                full = []
+                for (lid, st), (n, w) in groups.items():
+                    br = round(100.0 * w / n, 1) if n else 0.0
+                    full.append({'league_id': lid, 'league': names.get(lid, str(lid)),
+                                 'state': st, 'n': n, 'base_rate': br,
+                                 'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
+                _SCANNER_CACHE[ckey] = (now, full)
+            out = [x for x in full if x['n'] >= min_n and (not state_filter or x['state'] == state_filter)]
+            out.sort(key=lambda x: -x['base_rate'])
+            out = out[:60]
+            return jsonify({'minute': minute, 'market': market,
+                            'state': state_filter or 'tutti', 'min_n': min_n, 'rows': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
