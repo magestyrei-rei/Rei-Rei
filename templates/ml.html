@@ -85,7 +85,18 @@
 
   <section class="view" id="view-read">
     <style>#view-read select,#view-read input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
-    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> quando arriva la notifica, qui leggi <b>tutti i mercati insieme</b> per la situazione esatta. Scegli la partita in <b>Da partita live</b> (riempie da solo campionato/minuto/punteggio) o inserisci a mano. Per ogni mercato vedi <b>base rate</b>, <b>quota equa</b> e <b>n</b>; digita la <b>quota del bookie</b> e ti calcola l&#39;<b>edge</b> all&#39;istante.<br><b>&#x2705; Investi</b> dove l&#39;edge &egrave; <b>verde</b> (quota bookie &gt; quota equa) e <b>n &ge; 50</b>. <b>&#x274C; Salta</b> edge rosso o n&lt;50. La tabella &egrave; ordinata dal mercato pi&ugrave; probabile in alto.</div>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">
+      &#x1F4A1; <b>Come si usa &mdash; passo per passo:</b>
+      <ol style="margin:6px 0 8px 18px;padding:0">
+        <li>Quando arriva la notifica Telegram, apri questo tab.</li>
+        <li><b>Da partita live</b>: scegli la partita dal men&ugrave; &rarr; campionato, minuto e punteggio si compilano da soli. (Oppure inserisci tutto a mano.)</li>
+        <li><b>Gol casa / Gol ospite = il punteggio ATTUALE</b> (non chi ha segnato). Ma in una partita early-goal il punteggio dice gi&agrave; chi ha segnato per primo: <b>1-0 = ha segnato la casa</b>, <b>0-1 = ha segnato l&#39;ospite</b>. Imposta il <b>Minuto</b> al minuto reale della partita.</li>
+        <li>Premi <b>Calcola</b>: vedi tutti i mercati con <b>base rate</b> (quanto spesso si verifica), <b>quota equa</b> (il break-even) e <b>n</b> (su quante partite si basa).</li>
+        <li>Apri il tuo bookie, leggi la <b>quota live</b> e digitala nella colonna <b>Quota bookie</b> &rarr; l&#39;<b>edge</b> compare all&#39;istante.</li>
+        <li><b>&#x2705; Investi</b> se l&#39;edge &egrave; <b>verde</b> (quota bookie &gt; quota equa) <b>e n &ge; 50</b>. <b>&#x274C; Salta</b> se l&#39;edge &egrave; rosso oppure n&lt;50 (&#x26A0;).</li>
+      </ol>
+      <b>&#x1F4D8; Esempio pratico:</b> arriva la notifica &laquo;Junior vs Nacional 0-1, 1&deg; gol al 7&#39;&raquo;. La scegli da <i>Da partita live</i> &rarr; si compila: Colombia, minuto 7, Gol casa <b>0</b>, Gol ospite <b>1</b> (ha segnato l&#39;ospite). La partita prosegue: al 65&#39; &egrave; ancora 0-1, allora porti il <b>Minuto a 65</b> e premi Calcola. La board mostra <b>Over 1.5 = 63% (n=141), quota equa 1.59</b>. Apri il bookie: Over 1.5 live &egrave; a <b>1.75</b> &rarr; lo digiti &rarr; edge <b>+5,9% verde</b> &rarr; <b>investi</b>. Se invece fosse a <b>1.50</b> &rarr; edge <b>&minus;3,7% rosso</b> &rarr; lasci perdere. Stesso ragionamento per ogni riga della board.
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
       <div><label style="font-size:11px;color:#94a3b8;display:block">Da partita live (1 click)</label>
         <select id="read-live" onchange="pickLiveMatch()" style="min-width:280px"><option value="">&mdash; scegli una partita live &mdash;</option></select></div>
@@ -98,6 +109,7 @@
       <div><label style="font-size:11px;color:#94a3b8;display:block">Gol ospite</label><input type="number" id="read-sa" value="0" min="0" max="20" style="width:56px"></div>
       <button onclick="loadRead()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
     </div>
+    <div style="font-size:11px;color:#64748b;margin:-4px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> (1-0 = ha segnato la casa, 0-1 = l&#39;ospite).</div>
     <div id="read-board"><div style="color:#64748b;font-size:13px">Scegli una partita live o inserisci i dati e premi Calcola.</div></div>
   </section>
 
