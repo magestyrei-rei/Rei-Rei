@@ -80,7 +80,26 @@
      <div class="tab" data-view="bets">&#x1F4D2; I miei investimenti</div>
      <div class="tab" data-view="inplay">&#x26BD; Match in Play</div>
      <div class="tab" data-view="seg">&#x1F50E; Segmenti</div>
+     <div class="tab" data-view="read">&#x1F3AF; Lettura Live</div>
   </div>
+
+  <section class="view" id="view-read">
+    <style>#view-read select,#view-read input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> quando arriva la notifica, qui leggi <b>tutti i mercati insieme</b> per la situazione esatta. Scegli la partita in <b>Da partita live</b> (riempie da solo campionato/minuto/punteggio) o inserisci a mano. Per ogni mercato vedi <b>base rate</b>, <b>quota equa</b> e <b>n</b>; digita la <b>quota del bookie</b> e ti calcola l&#39;<b>edge</b> all&#39;istante.<br><b>&#x2705; Investi</b> dove l&#39;edge &egrave; <b>verde</b> (quota bookie &gt; quota equa) e <b>n &ge; 50</b>. <b>&#x274C; Salta</b> edge rosso o n&lt;50. La tabella &egrave; ordinata dal mercato pi&ugrave; probabile in alto.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Da partita live (1 click)</label>
+        <select id="read-live" onchange="pickLiveMatch()" style="min-width:280px"><option value="">&mdash; scegli una partita live &mdash;</option></select></div>
+      <button onclick="loadReadLive()" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:6px;cursor:pointer">&#x21BB; aggiorna live</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="read-league" style="min-width:170px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto</label><input type="number" id="read-minute" value="65" min="0" max="120" style="width:64px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol casa</label><input type="number" id="read-sh" value="1" min="0" max="20" style="width:56px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol ospite</label><input type="number" id="read-sa" value="0" min="0" max="20" style="width:56px"></div>
+      <button onclick="loadRead()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
+    </div>
+    <div id="read-board"><div style="color:#64748b;font-size:13px">Scegli una partita live o inserisci i dati e premi Calcola.</div></div>
+  </section>
 
   <section class="view" id="view-seg">
     <style>#view-seg select,#view-seg input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
@@ -460,6 +479,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "bets") loadBets();
     if (t.dataset.view === "inplay") { loadInPlay(); startInPlayRefresh(); } else { stopInPlayRefresh(); }
     if (t.dataset.view === "seg") loadSegInit();
+    if (t.dataset.view === "read") loadReadInit();
   });
 });
 
@@ -1228,6 +1248,92 @@ async function loadSegments(){
     h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">La <b>quota equa</b> &egrave; il break-even: <b>investi solo se la quota del bookie &egrave; PI&Ugrave; ALTA</b>. Ignora le righe con n&lt;50 (rumore statistico).</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+
+// === Lettura Live (cruscotto tutti i mercati) ===
+var _readLeaguesLoaded=false;
+async function loadReadInit(){
+  if(!_readLeaguesLoaded){
+    _readLeaguesLoaded=true;
+    try{
+      var r=await fetch('/api/leagues');var d=await r.json();
+      var arr=Array.isArray(d)?d:(d.leagues||[]);
+      arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      var sel=document.getElementById('read-league');
+      arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+    }catch(e){}
+  }
+  loadReadLive();
+}
+async function loadReadLive(){
+  var sel=document.getElementById('read-live');
+  try{
+    var r=await fetch('/api/live-earlygoal');var d=await r.json();
+    var ms=d.matches||[];
+    sel.innerHTML='<option value="">&mdash; partite live ('+ms.length+') &mdash;</option>';
+    ms.forEach(function(m,i){
+      var o=document.createElement('option');
+      o.value=i;
+      o.textContent=(m.league||'')+': '+m.home+' vs '+m.away+'  '+m.score+'  ('+(m.minute||'?')+"')";
+      o.dataset.lid=m.league_id; o.dataset.min=m.minute||''; o.dataset.score=m.score||'';
+      sel.appendChild(o);
+    });
+  }catch(e){}
+}
+function pickLiveMatch(){
+  var sel=document.getElementById('read-live');
+  var opt=sel.options[sel.selectedIndex];
+  if(!opt||!opt.value){return;}
+  var lid=opt.dataset.lid, mn=opt.dataset.min, sc=(opt.dataset.score||'').split('-');
+  if(lid){document.getElementById('read-league').value=lid;}
+  if(mn){document.getElementById('read-minute').value=mn;}
+  if(sc.length===2){document.getElementById('read-sh').value=sc[0];document.getElementById('read-sa').value=sc[1];}
+  loadRead();
+}
+async function loadRead(){
+  var el=document.getElementById('read-board');
+  var lid=document.getElementById('read-league').value;
+  var mn=document.getElementById('read-minute').value||'65';
+  var sh=document.getElementById('read-sh').value||'0';
+  var sa=document.getElementById('read-sa').value||'0';
+  if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  try{
+    var r=await fetch('/api/live-read?league='+lid+'&minute='+mn+'&sh='+sh+'&sa='+sa);var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    var mk=d.markets||[];
+    if(!mk.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun mercato aperto per questo stato (forse gi&agrave; tutti decisi).</div>';return;}
+    var h='<div style="margin-bottom:6px;font-size:12.5px;color:#cbd5e1">Stato: <b>'+d.state+'</b> al <b>'+d.minute+"'</b> &middot; digita la quota del bookie per vedere l&#39;edge</div>";
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+      +'<th style="padding:7px 10px;text-align:left">Mercato</th>'
+      +'<th style="padding:7px 10px;text-align:center">Base rate</th>'
+      +'<th style="padding:7px 10px;text-align:center">Quota equa</th>'
+      +'<th style="padding:7px 10px;text-align:center">n</th>'
+      +'<th style="padding:7px 10px;text-align:center">Quota bookie</th>'
+      +'<th style="padding:7px 10px;text-align:center">Edge</th></tr></thead><tbody>';
+    mk.forEach(function(s,i){
+      var weak=s.n<50;
+      var bg=i%2?'background:#0f172a;':'';
+      h+='<tr style="border-top:1px solid #1e293b;'+bg+(weak?'opacity:.6;':'')+'">'
+        +'<td style="padding:6px 10px;font-weight:600;color:#e2e8f0">'+s.label+(weak?' <span style="color:#f59e0b;font-size:11px">&#x26A0;</span>':'')+'</td>'
+        +'<td style="padding:6px 10px;text-align:center;font-weight:700;color:#93c5fd">'+s.base_rate+'%</td>'
+        +'<td style="padding:6px 10px;text-align:center;font-weight:700">'+(s.fair_odds||'-')+'</td>'
+        +'<td style="padding:6px 10px;text-align:center;color:#94a3b8">'+s.n+'</td>'
+        +'<td style="padding:6px 10px;text-align:center"><input type="number" step="0.01" min="1" style="width:70px" oninput="calcEdge(this,'+s.base_rate+')" placeholder="es. 1.80"></td>'
+        +'<td style="padding:6px 10px;text-align:center;font-weight:700" class="edge-cell">-</td></tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Edge = base rate &minus; probabilit&agrave; implicita della quota. <b>Verde = valore</b> (quota bookie &gt; quota equa). Ignora le righe con n&lt;50 (&#x26A0;).</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function calcEdge(inp, baseRate){
+  var q=parseFloat(inp.value);
+  var cell=inp.parentNode.parentNode.querySelector('.edge-cell');
+  if(!q||q<=1){cell.textContent='-';cell.style.color='#94a3b8';return;}
+  var edge=baseRate-(100.0/q);
+  cell.textContent=(edge>=0?'+':'')+edge.toFixed(1)+'%';
+  cell.style.color=edge>=0?'#22c55e':'#f87171';
 }
 
 </script>

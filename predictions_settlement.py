@@ -706,6 +706,7 @@ def _refresh_live_eg(send_telegram=False):
         teams = f.get('teams') or {}
         out.append({
             'fixture_id': fid,
+            'league_id': lid,
             'league': _league_name(lid) or lg.get('name'),
             'home': (teams.get('home') or {}).get('name'),
             'away': (teams.get('away') or {}).get('name'),
@@ -1408,5 +1409,41 @@ def register(app):
                             'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
             out.sort(key=lambda x: -x['n'])
             return jsonify({'league_id': lid, 'minute': minute, 'market': market, 'segments': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-read')
+    def api_live_read():
+        """Cruscotto live: per (campionato, minuto, punteggio attuale) restituisce
+        TUTTI i mercati insieme con base rate storico + quota equa + n, cosi' in
+        diretta vedi subito dove c'e' valore. Salta i mercati gia' decisi dallo
+        stato corrente (es. Over 1.5 se sono gia' 2 gol)."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            minute = int(request.args.get('minute') or 65)
+            sh = int(request.args.get('sh') or 0)
+            sa = int(request.args.get('sa') or 0)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            total = sh + sa
+            markets = [('over_1_5', 'Over 1.5'), ('over_2_5', 'Over 2.5'),
+                       ('over_3_5', 'Over 3.5'), ('over_4_5', 'Over 4.5'),
+                       ('btts_si', 'BTTS Si'), ('btts_no', 'BTTS No'),
+                       ('1', '1 (Casa)'), ('X', 'X (Pari)'), ('2', '2 (Ospite)')]
+            OVER_THR = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+            out = []
+            for mk, label in markets:
+                if mk in OVER_THR and total >= OVER_THR[mk]:
+                    continue
+                if mk in ('btts_si', 'btts_no') and sh > 0 and sa > 0:
+                    continue
+                br, n = _bet_base_rate(lid, mk, minute, sh, sa)
+                if not n:
+                    continue
+                out.append({'market': mk, 'label': label, 'base_rate': br, 'n': n,
+                            'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
+            out.sort(key=lambda x: -x['base_rate'])
+            return jsonify({'league_id': lid, 'minute': minute, 'state': '%d-%d' % (sh, sa),
+                            'total': total, 'markets': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
