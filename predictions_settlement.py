@@ -600,8 +600,28 @@ def _bet_base_rate(league_id, market, minute, sh, sa):
         return None, 0
     return round(100.0 * won / matched, 1), matched
 
+def _norm_toks(s):
+    """Token normalizzati di un nome squadra (minuscolo, senza accenti, >=3 lettere)."""
+    import unicodedata as _ud, re as _re2
+    s = (s or '').lower()
+    s = ''.join(c for c in _ud.normalize('NFKD', s) if not _ud.combining(c))
+    return set(t for t in _re2.findall(r'[a-z0-9]+', s) if len(t) >= 3)
+
+_GENERIC_TEAM = {'deportivo', 'atletico', 'club', 'sportivo', 'sporting', 'real',
+                 'afc', 'san', 'del', 'dos', 'das', 'futbol', 'calcio', 'sport'}
+
+def _name_match(a, b):
+    """True se i nomi squadra condividono almeno un token DISTINTIVO (non generico),
+    cosi' 'Deportivo Moron' non combacia con 'Deportivo Riestra'."""
+    ta, tb = _norm_toks(a), _norm_toks(b)
+    if not ta or not tb:
+        return False
+    common = (ta & tb) - _GENERIC_TEAM
+    return bool(common)
+
 def _settle_user_bets(limit=80):
-    """Settla le giocate pending che hanno fixture_id, via API-Football."""
+    """Settla le giocate pending: pass 1 quelle con fixture_id; pass 2 quelle
+    scritte a mano (senza fixture_id) agganciandole per lega+data+squadre."""
     _ensure_bets_ddl()
     rows = _turso_select_rows(
         "SELECT id, fixture_id, market, odds, stake FROM user_bets "
@@ -614,6 +634,54 @@ def _settle_user_bets(limit=80):
             if rec is None:
                 continue
             fh, fa = rec.get('ft_home'), rec.get('ft_away')
+            w = _bet_market_win(r.get('market'), fh, fa)
+            if w is None:
+                continue
+            stake = r.get('stake') or 1.0
+            odds = r.get('odds') or 0.0
+            pnl = stake * (odds - 1.0) if w else -stake
+            _turso_execute(
+                "UPDATE user_bets SET status='settled', ft_home=?, ft_away=?, result=?, pnl=?, settled_ts=? WHERE id=?",
+                [fh, fa, ('WIN' if w else 'LOSS'), round(pnl, 2), int(time.time()), r['id']]
+            )
+            settled += 1
+            time.sleep(0.2)
+        except Exception:
+            pass
+    # --- pass 2: giocate scritte a mano (senza fixture_id) -> aggancio per lega+data+squadre ---
+    rows2 = _turso_select_rows(
+        "SELECT id, league_id, match_date, home_team, away_team, market, odds, stake "
+        "FROM user_bets WHERE result IS NULL AND fixture_id IS NULL "
+        "AND league_id IS NOT NULL AND match_date IS NOT NULL LIMIT ?", [int(limit)]
+    )
+    for r in rows2:
+        try:
+            date = (r.get('match_date') or '')
+            lid = r.get('league_id')
+            if not lid or len(date) < 10:
+                continue
+            yr = int(date[:4])
+            fx = None
+            for season in (yr, yr - 1):
+                data = _af_get('/fixtures', params={'league': int(lid), 'season': season, 'date': date})
+                for f in (data.get('response') or []):
+                    t = f.get('teams') or {}
+                    if _name_match(r.get('home_team'), (t.get('home') or {}).get('name')) and \
+                       _name_match(r.get('away_team'), (t.get('away') or {}).get('name')):
+                        fx = f
+                        break
+                if fx:
+                    break
+            if not fx:
+                continue
+            fid = (fx.get('fixture') or {}).get('id')
+            if fid:
+                _turso_execute("UPDATE user_bets SET fixture_id=? WHERE id=?", [fid, r['id']])
+            st = ((fx.get('fixture') or {}).get('status') or {}).get('short')
+            if st not in ('FT', 'AET', 'PEN'):
+                continue  # non ancora finita: si settla al prossimo giro via fixture_id
+            g = fx.get('goals') or {}
+            fh, fa = g.get('home'), g.get('away')
             w = _bet_market_win(r.get('market'), fh, fa)
             if w is None:
                 continue
