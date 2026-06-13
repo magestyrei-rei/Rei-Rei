@@ -493,10 +493,12 @@ def api_league_streaks(lid):
         ORDER BY sort_date ASC, time_str ASC
     """, (lid,))
 
-    # NB: niente 'Over 0.5' -> nel dataset (solo match con 1o gol <=16') vale ~100%,
-    # mercato degenere/non informativo. ST Over 0.5 sarebbe l'unico utile (rimettibile).
+    # NB: 'Over 0.5' solo nel 2T (ST): in FT/HT c'e' sempre il gol early (<=16') -> ~100% degenere.
+    # Nel 2T invece e' informativo (il secondo tempo puo' finire con 0 gol).
     MARKETS = ['1', 'X', '2', 'BTTS', 'Over 1.5',
                'Over 2.5', 'Over 3.5', 'Over 4.5']
+    MARKETS_ST = ['1', 'X', '2', 'BTTS', 'Over 0.5', 'Over 1.5',
+                  'Over 2.5', 'Over 3.5', 'Over 4.5']
 
     def market_hits(h, a):
         tot = h + a
@@ -513,16 +515,17 @@ def api_league_streaks(lid):
 
     out = {}
     for pkey, (kh, ka) in periods.items():
-        seqs = {mk: [] for mk in MARKETS}
+        mkts = MARKETS_ST if pkey == 'ST' else MARKETS
+        seqs = {mk: [] for mk in mkts}
         for m in rows:
             h, a = m[kh], m[ka]
             if h is None or a is None:
                 continue
             hh = market_hits(h, a)
-            for mk in MARKETS:
+            for mk in mkts:
                 seqs[mk].append(1 if hh[mk] else 0)
         pdata = []
-        for mk in MARKETS:
+        for mk in mkts:
             s = seqs[mk]
             tot = len(s)
             won = sum(s)
