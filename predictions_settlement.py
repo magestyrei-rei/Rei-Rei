@@ -1429,6 +1429,7 @@ def register(app):
             lid = int(request.args.get('league') or 0)
             minute = int(request.args.get('minute') or 65)
             market = (request.args.get('market') or 'over_1_5').strip()
+            first = (request.args.get('first') or '').strip()  # '', 'home', 'away' = chi ha segnato il 1o gol
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
             OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
@@ -1444,6 +1445,11 @@ def register(app):
                 if fh is None or fa is None:
                     continue
                 tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                if first:
+                    if not tl or tl[0][1] is None:
+                        continue
+                    if (first == 'away') != bool(tl[0][1]):  # tl[0] = 1o gol; True = ospite
+                        continue
                 if any(aw is None for (mn, aw) in tl if mn <= minute):
                     continue
                 hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
@@ -1477,7 +1483,8 @@ def register(app):
                 out.append({'state': st, 'n': n, 'wins': w, 'base_rate': br,
                             'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
             out.sort(key=lambda x: -x['n'])
-            return jsonify({'league_id': lid, 'minute': minute, 'market': market, 'segments': out})
+            return jsonify({'league_id': lid, 'minute': minute, 'market': market,
+                            'first': first or 'qualsiasi', 'segments': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 

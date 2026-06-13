@@ -141,7 +141,7 @@
 
   <section class="view" id="view-seg">
     <style>#view-seg select,#view-seg input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
-    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> scegli campionato + minuto + mercato &rarr; per ogni <b>stato</b> (es. 1-0, 0-1 = anche chi ha segnato il 1&deg; gol) vedi quanto spesso il mercato si verifica storicamente (<b>base rate</b>), su quante partite (<b>n</b>) e la <b>quota equa</b>. Cerca le <b>nicchie affidabili</b>: n alto + base rate alta.<br><b>&#x2705; Quando INVESTIRE (esempio):</b> Over 1.5, 65', stato <b>0-1</b> &rarr; 67% (n=180) &rarr; quota equa <b>1.49</b>. Il bookie offre <b>1.60</b> &rarr; tua implicita 62,5% &lt; 67% &rarr; <b>edge +4,5% = VALORE</b>.<br><b>&#x274C; Quando NON investire (esempio):</b> stesso mercato, stato <b>1-0</b> &rarr; 62% (n=210) &rarr; quota equa <b>1.61</b>. Il bookie offre <b>1.50</b> &rarr; implicita 66,7% &gt; 62% &rarr; <b>edge negativo, lascia stare</b>. E se <b>n&lt;50</b> salta sempre (campione troppo piccolo).</div>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.6">&#x1F4A1; <b>Come si usa:</b> scegli campionato + minuto + mercato (e se vuoi <b>chi ha segnato il 1&deg; gol</b>: Casa / Ospite / Qualsiasi) &rarr; per ogni <b>stato</b> (es. 1-0, 0-1) vedi quanto spesso il mercato si verifica storicamente (<b>base rate</b>), su quante partite (<b>n</b>) e la <b>quota equa</b>. Cerca le <b>nicchie affidabili</b>: n alto + base rate alta.<br><b>&#x2705; Quando INVESTIRE (esempio):</b> Over 1.5, 65', stato <b>0-1</b> &rarr; 67% (n=180) &rarr; quota equa <b>1.49</b>. Il bookie offre <b>1.60</b> &rarr; tua implicita 62,5% &lt; 67% &rarr; <b>edge +4,5% = VALORE</b>.<br><b>&#x274C; Quando NON investire (esempio):</b> stesso mercato, stato <b>1-0</b> &rarr; 62% (n=210) &rarr; quota equa <b>1.61</b>. Il bookie offre <b>1.50</b> &rarr; implicita 66,7% &gt; 62% &rarr; <b>edge negativo, lascia stare</b>. E se <b>n&lt;50</b> salta sempre (campione troppo piccolo).<br>&#x1F3AF; <b>1&deg; gol di</b>: filtra le partite per chi ha aperto le marcature (es. solo dove ha segnato per primo l&#39;ospite). Segnale forte nel tuo niche &mdash; sui dati storici chi segna il gol early vince il ~64% delle volte. Filtrando per&ograve; n cala.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
       <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="seg-league" style="min-width:180px"></select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto</label><input type="number" id="seg-minute" value="65" min="0" max="120" style="width:70px"></div>
@@ -150,6 +150,11 @@
         <option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
         <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
         <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
+      </select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">1&deg; gol di</label><select id="seg-first">
+        <option value="">Qualsiasi</option>
+        <option value="home">Casa</option>
+        <option value="away">Ospite</option>
       </select></div>
       <button onclick="loadSegments()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
     </div>
@@ -1259,10 +1264,11 @@ async function loadSegments(){
   var lid=document.getElementById('seg-league').value;
   var minute=document.getElementById('seg-minute').value||'65';
   var market=document.getElementById('seg-market').value;
+  var first=document.getElementById('seg-first').value;
   if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
   el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
   try{
-    var r=await fetch('/api/segments?league='+lid+'&minute='+minute+'&market='+market);var d=await r.json();
+    var r=await fetch('/api/segments?league='+lid+'&minute='+minute+'&market='+market+(first?('&first='+first):''));var d=await r.json();
     if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
     var segs=d.segments||[];
     if(!segs.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuno stato aperto per questo mercato a questo minuto (forse il mercato &egrave; gi&agrave; deciso prima).</div>';return;}
