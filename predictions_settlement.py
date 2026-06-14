@@ -1488,6 +1488,71 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
+    @app.route('/api/comebacks')
+    def api_comebacks():
+        """Traiettoria del vantaggio: per i match early-goal di una lega, quante volte
+        chi ha segnato per primo (andando avanti) ha poi SUBITO una rimonta (e' finito
+        sotto) e come e' finita: ri-vinta / pareggiata / persa. Filtrabile per chi ha
+        segnato il 1o gol (first=home|away). Serve la sequenza gol completa."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            first = (request.args.get('first') or '').strip()
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            con = _sqlite3.connect(_LOCAL_DB)
+            con.row_factory = _sqlite3.Row
+            rows = con.execute(
+                "SELECT goals_html, goals_text, ft_home, ft_away FROM matches WHERE league_id=?",
+                (lid,)).fetchall()
+            con.close()
+            cat = {'held_won': 0, 'never_behind_draw': 0,
+                   'overturned_won': 0, 'overturned_draw': 0, 'overturned_lost': 0}
+            total = 0
+            for r in rows:
+                fh, fa = r['ft_home'], r['ft_away']
+                if fh is None or fa is None:
+                    continue
+                tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                if not tl or any(aw is None for (mn, aw) in tl):
+                    continue  # serve la sequenza completa per la traiettoria
+                fa_first = tl[0][1]  # True = ospite ha segnato per primo
+                if first == 'home' and fa_first:
+                    continue
+                if first == 'away' and not fa_first:
+                    continue
+                h = a = 0
+                behind = False
+                for (mn, aw) in tl:
+                    if aw:
+                        a += 1
+                    else:
+                        h += 1
+                    if fa_first and h > a:          # 1o marcatore = ospite -> sotto se casa supera
+                        behind = True
+                    elif (not fa_first) and a > h:  # 1o marcatore = casa -> sotto se ospite supera
+                        behind = True
+                if fa_first:
+                    fs_win, draw = fa > fh, fa == fh
+                else:
+                    fs_win, draw = fh > fa, fh == fa
+                total += 1
+                if not behind:
+                    cat['held_won' if fs_win else 'never_behind_draw'] += 1
+                else:
+                    cat['overturned_won' if fs_win else ('overturned_draw' if draw else 'overturned_lost')] += 1
+            def pct(n):
+                return round(100.0 * n / total, 1) if total else 0.0
+            overturned = cat['overturned_won'] + cat['overturned_draw'] + cat['overturned_lost']
+            recovered = cat['overturned_won'] + cat['overturned_draw']
+            return jsonify({
+                'league_id': lid, 'first': first or 'qualsiasi', 'total': total,
+                'categories': cat, 'pct': {k: pct(v) for k, v in cat.items()},
+                'overturned': overturned, 'overturned_pct': pct(overturned),
+                'recovered': recovered, 'recovered_pct': pct(recovered),
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
     @app.route('/api/live-read')
     def api_live_read():
         """Cruscotto live: per (campionato, minuto, punteggio attuale) restituisce

@@ -82,7 +82,20 @@
      <div class="tab" data-view="seg">&#x1F50E; Segmenti</div>
      <div class="tab" data-view="read">&#x1F3AF; Lettura Live</div>
      <div class="tab" data-view="scan">&#x1F9ED; Scanner</div>
+     <div class="tab" data-view="comeback">&#x1F504; Rimonte</div>
   </div>
+
+  <section class="view" id="view-comeback">
+    <style>#view-comeback select{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4A1; <b>Come si usa:</b> per chi ha <b>segnato per primo</b> (andando in vantaggio), vedi quante volte ha poi <b>SUBITO una rimonta</b> (&egrave; finito sotto) e com&#39;&egrave; finita. Il tuo caso <b>1-0 &rarr; 1-2 &rarr; 2-2</b> (pareggiata) o <b>3-2</b> (ri-vinta) sono le righe <b>&laquo;Ribaltato poi recuperato&raquo;</b>. Filtra per chi ha segnato il 1&deg; gol.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="cb-league" style="min-width:180px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">1&deg; gol di</label><select id="cb-first">
+        <option value="">Qualsiasi</option><option value="home">Casa</option><option value="away">Ospite</option></select></div>
+      <button onclick="loadComebacks()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
+    </div>
+    <div id="cb-box"><div style="color:#64748b;font-size:13px">Scegli un campionato e premi Calcola.</div></div>
+  </section>
 
   <section class="view" id="view-scan">
     <style>#view-scan select,#view-scan input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
@@ -524,6 +537,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "seg") loadSegInit();
     if (t.dataset.view === "read") loadReadInit();
     if (t.dataset.view === "scan") loadScannerInit();
+    if (t.dataset.view === "comeback") loadComebackInit();
   });
 });
 
@@ -1417,6 +1431,58 @@ async function loadScanner(){
     });
     h+='</tbody></table></div>';
     h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Questi sono i tuoi <b>terreni di caccia</b> migliori (dove il mercato accade pi&ugrave; spesso con dati affidabili). L&#39;edge vero per&ograve; dipende dalla quota live &mdash; confermala in <b>Lettura Live</b> prima di puntare.</div>';
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+
+// === Rimonte (traiettoria del vantaggio) ===
+var _cbLeaguesLoaded=false;
+async function loadComebackInit(){
+  if(_cbLeaguesLoaded)return;
+  _cbLeaguesLoaded=true;
+  try{
+    var r=await fetch('/api/leagues');var d=await r.json();
+    var arr=Array.isArray(d)?d:(d.leagues||[]);
+    arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+    var sel=document.getElementById('cb-league');
+    arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+  }catch(e){}
+}
+async function loadComebacks(){
+  var el=document.getElementById('cb-box');
+  var lid=document.getElementById('cb-league').value;
+  var first=document.getElementById('cb-first').value;
+  if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  try{
+    var r=await fetch('/api/comebacks?league='+lid+(first?('&first='+first):''));var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    if(!d.total){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun dato per questo filtro.</div>';return;}
+    var c=d.categories,p=d.pct;
+    var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px">';
+    h+=_betCard('Partite analizzate',d.total);
+    h+=_betCard('Vantaggio ribaltato',d.overturned_pct+'% ('+d.overturned+')','#f59e0b');
+    h+=_betCard('...poi recuperato',d.recovered_pct+'% ('+d.recovered+')','#22c55e');
+    h+='</div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+      +'<th style="padding:7px 10px;text-align:left">Esito di chi ha segnato per primo</th>'
+      +'<th style="padding:7px 10px;text-align:center">Partite</th>'
+      +'<th style="padding:7px 10px;text-align:center">%</th></tr></thead><tbody>';
+    var rd=[
+      ['held_won','Vantaggio mantenuto / vinta','#cbd5e1',''],
+      ['never_behind_draw','Mai sotto, ma finita pari (es. 1-0 &rarr; 1-1)','#cbd5e1',''],
+      ['overturned_won','Ribaltato, poi RI-vinto (es. 1-0 &rarr; 1-2 &rarr; 3-2)','#22c55e','background:#0f2616;'],
+      ['overturned_draw','Ribaltato, poi pareggiato (es. 1-0 &rarr; 1-2 &rarr; 2-2)','#fde68a','background:#2a2410;'],
+      ['overturned_lost','Ribaltato e perso','#f87171','']
+    ];
+    rd.forEach(function(x){
+      h+='<tr style="border-top:1px solid #1e293b;'+x[3]+'">'
+        +'<td style="padding:6px 10px;color:'+x[2]+'">'+x[1]+'</td>'
+        +'<td style="padding:6px 10px;text-align:center;color:#94a3b8">'+c[x[0]]+'</td>'
+        +'<td style="padding:6px 10px;text-align:center;font-weight:700;color:'+x[2]+'">'+p[x[0]]+'%</td></tr>';
+    });
+    h+='</tbody></table></div>';
+    h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Il tuo caso (1-0 &rarr; 1-2 &rarr; 2-2 o 3-2) = le righe <b>Ribaltato poi recuperato</b>: <b>'+d.recovered_pct+'%</b> delle partite.</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
