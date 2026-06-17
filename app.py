@@ -495,9 +495,9 @@ def api_league_streaks(lid):
 
     # NB: 'Over 0.5' solo nel 2T (ST): in FT/HT c'e' sempre il gol early (<=16') -> ~100% degenere.
     # Nel 2T invece e' informativo (il secondo tempo puo' finire con 0 gol).
-    MARKETS = ['1', 'X', '2', 'BTTS', 'Over 1.5',
+    MARKETS = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite', 'Over 1.5',
                'Over 2.5', 'Over 3.5', 'Over 4.5']
-    MARKETS_ST = ['1', 'X', '2', 'BTTS', 'Over 0.5', 'Over 1.5',
+    MARKETS_ST = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite', 'Over 0.5', 'Over 1.5',
                   'Over 2.5', 'Over 3.5', 'Over 4.5']
 
     def market_hits(h, a):
@@ -505,6 +505,7 @@ def api_league_streaks(lid):
         return {
             '1': h > a, 'X': h == a, '2': h < a,
             'BTTS': h > 0 and a > 0,
+            'Gol Casa': h > 0, 'Gol Ospite': a > 0,
             'Over 0.5': tot > 0, 'Over 1.5': tot > 1, 'Over 2.5': tot > 2,
             'Over 3.5': tot > 3, 'Over 4.5': tot > 4,
         }
