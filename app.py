@@ -1010,7 +1010,7 @@ def api_backfill_league():
                "<td>%d-%d</td><td>%d-%d</td><td>%d-%d</td><td>%s</td><td>-</td><td>-</td><td>-</td></tr>") % (
                season, date_disp, time_str, home, away, lname, hh, ha, st_h, st_a, fth, fta, gcell)
         rows.append({"fixture_id": fid, "date": date_disp, "home": home, "away": away, "row": row})
-        time.sleep(0.1)  # rispetta il rate limit api-sports
+        time.sleep(0.1)  # rispetta il rate limit api-sports (1 chiamata eventi per partita)
     return jsonify({"league_id": lid, "league_name": league_label, "season": season,
                     "checked": checked, "count": len(rows), "rows": rows})
 
