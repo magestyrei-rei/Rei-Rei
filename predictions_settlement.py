@@ -527,6 +527,7 @@ def _bet_market_win(market, fh, fa):
     table = {
         'over_0_5': tot > 0, 'over_1_5': tot > 1, 'over_2_5': tot > 2,
         'over_3_5': tot > 3, 'over_4_5': tot > 4,
+        'under_1_5': tot < 2, 'under_2_5': tot < 3, 'under_3_5': tot < 4, 'under_4_5': tot < 5,
         'btts_si': btts, 'btts_no': not btts,
         '1': fh > fa, 'X': fh == fa, '2': fa > fh,
     }
@@ -566,7 +567,7 @@ def _bet_base_rate(league_id, market, minute, sh, sa):
     except Exception:
         return None, 0
     cur_total = (sh or 0) + (sa or 0)
-    is_over = market.startswith('over_')
+    is_total = market.startswith('over_') or market.startswith('under_')
     matched = won = 0
     for r in rows:
         fh, fa = r['ft_home'], r['ft_away']
@@ -577,7 +578,7 @@ def _bet_base_rate(league_id, market, minute, sh, sa):
         aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
         unkM = sum(1 for (mn, aw) in tl if mn <= minute and aw is None)
         totM = hM + aM + unkM
-        if is_over:
+        if is_total:
             if totM != cur_total:
                 continue
         elif market in ('btts_si', 'btts_no'):
@@ -1433,6 +1434,7 @@ def register(app):
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
             OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+            UNDER = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             rows = con.execute(
@@ -1460,6 +1462,11 @@ def register(app):
                     if totM >= thr:
                         continue
                     win = (fh + fa) >= thr
+                elif market in UNDER:
+                    thr = UNDER[market]
+                    if totM >= thr:
+                        continue
+                    win = (fh + fa) < thr
                 elif market == 'btts_si':
                     if hM > 0 and aM > 0:
                         continue
@@ -1569,9 +1576,12 @@ def register(app):
             total = sh + sa
             markets = [('over_1_5', 'Over 1.5'), ('over_2_5', 'Over 2.5'),
                        ('over_3_5', 'Over 3.5'), ('over_4_5', 'Over 4.5'),
+                       ('under_1_5', 'Under 1.5'), ('under_2_5', 'Under 2.5'),
+                       ('under_3_5', 'Under 3.5'), ('under_4_5', 'Under 4.5'),
                        ('btts_si', 'BTTS Si'), ('btts_no', 'BTTS No'),
                        ('1', '1 (Casa)'), ('X', 'X (Pari)'), ('2', '2 (Ospite)')]
-            OVER_THR = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+            OVER_THR = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5,
+                        'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
             out = []
             for mk, label in markets:
                 if mk in OVER_THR and total >= OVER_THR[mk]:
@@ -1607,6 +1617,7 @@ def register(app):
                 full = cached[1]
             else:
                 OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+                UNDER = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
                 con = _sqlite3.connect(_LOCAL_DB)
                 con.row_factory = _sqlite3.Row
                 rows = con.execute(
@@ -1629,6 +1640,11 @@ def register(app):
                         if totM >= thr:
                             continue
                         win = (fh + fa) >= thr
+                    elif market in UNDER:
+                        thr = UNDER[market]
+                        if totM >= thr:
+                            continue
+                        win = (fh + fa) < thr
                     elif market == 'btts_si':
                         if hM > 0 and aM > 0:
                             continue

@@ -105,6 +105,7 @@
       <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="scan-market">
         <option value="over_1_5" selected>Over 1.5</option><option value="over_2_5">Over 2.5</option>
         <option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
+        <option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option>
         <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
         <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
       </select></div>
@@ -161,6 +162,7 @@
       <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="seg-market">
         <option value="over_0_5">Over 0.5</option><option value="over_1_5" selected>Over 1.5</option>
         <option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
+        <option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option>
         <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
         <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
       </select></div>
@@ -198,6 +200,7 @@
         <div><label style="font-size:11px;color:#94a3b8">Mercato</label><select id="bet-market" style="width:100%">
           <option value="over_0_5">Over 0.5</option><option value="over_1_5" selected>Over 1.5</option>
           <option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
+          <option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option>
           <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
           <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
         </select></div>
@@ -1079,7 +1082,7 @@ function renderStreaks(){
 // === I miei investimenti (paper trading + edge vs base-rate) ===
 var _betLeaguesLoaded=false;
 function _betCard(label,val,col){return '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">'+label+'</div><div style="font-size:16px;font-weight:700;color:'+(col||'#e2e8f0')+'">'+val+'</div></div>';}
-var _MKTLAB={over_0_5:'Over 0.5',over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',over_4_5:'Over 4.5',btts_si:'BTTS Si',btts_no:'BTTS No','1':'1','X':'X','2':'2'};
+var _MKTLAB={over_0_5:'Over 0.5',over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',over_4_5:'Over 4.5',under_1_5:'Under 1.5',under_2_5:'Under 2.5',under_3_5:'Under 3.5',under_4_5:'Under 4.5',btts_si:'BTTS Si',btts_no:'BTTS No','1':'1','X':'X','2':'2'};
 async function loadBets(){
   if(!_betLeaguesLoaded){
     _betLeaguesLoaded=true;
