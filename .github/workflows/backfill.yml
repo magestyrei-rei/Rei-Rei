@@ -1,0 +1,59 @@
+name: Backfill storico campionato
+
+# Backfill UNA-TANTUM dello storico di un campionato nuovo.
+# Lancialo a mano (Run workflow) indicando l'ID api-sports del campionato.
+# Scarica lo storico via /api/backfill-league (usa la chiave api-sports su Render),
+# scrive data/<id>_gol-16min.html, ricostruisce il football.db.gz e fa il deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_id:
+        description: "ID api-sports del campionato (es. 357 = Ireland Premier Division)"
+        required: true
+      season_start:
+        description: "Prima stagione da provare"
+        required: true
+        default: "2008"
+      season_end:
+        description: "Ultima stagione"
+        required: true
+        default: "2026"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-db          # stesso gruppo del rebuild: evita rebuild concorrenti
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Backfill storico -> data/<id>_gol-16min.html
+        env:
+          TICK_AUTH_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
+        run: python3 scripts/backfill_league.py "${{ inputs.league_id }}" "${{ inputs.season_start }}" "${{ inputs.season_end }}"
+
+      - name: Rebuild football.db.gz da data/*.html
+        run: python3 scripts/rebuild_from_html.py
+
+      - name: Commit data/ + football.db.gz
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add data/ football.db.gz
+          git diff --staged --quiet || (git commit -m "backfill: campionato ${{ inputs.league_id }}" && git pull --rebase origin main && git push)
+
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "$RENDER_HOOK" || true
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}

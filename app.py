@@ -929,6 +929,91 @@ def api_earlygoal_sync():
                           "label": "%s %d-%d %s (%s, 1o gol %d')" % (home, fth, fta, away, lname, fg_min)})
     return jsonify({"ok": True, "checked": checked, "added": len(added), "matches": added})
 
+@app.route("/api/backfill-league")
+def api_backfill_league():
+    """Backfill storico di UN campionato per UNA stagione: scarica le partite finite
+    col 1o gol <=16' e ne restituisce le RIGHE HTML (formato data/). Non scrive nel DB
+    (la persistenza e' via data/ + rebuild). Usa la chiave api-sports gia' su Render.
+    Protetto con TICK_AUTH_TOKEN. Una stagione per chiamata (sta nei 120s di gunicorn)."""
+    import urllib.request as _u, urllib.parse as _up
+    tok = request.args.get("token", "") or request.headers.get("X-Tick-Token", "")
+    expected = os.environ.get("TICK_AUTH_TOKEN", "")
+    if not expected or tok != expected:
+        return jsonify({"error": "unauthorized"}), 401
+    key = os.environ.get("APISPORTS_KEY", "")
+    if not key:
+        return jsonify({"error": "APISPORTS_KEY not set"}), 500
+    lid = request.args.get("league", type=int)
+    season = request.args.get("season", type=int)
+    if not lid or not season:
+        return jsonify({"error": "league e season richiesti"}), 400
+
+    def _af(path, params):
+        url = "https://v3.football.api-sports.io" + path + "?" + _up.urlencode(params)
+        req = _u.Request(url, headers={"x-apisports-key": key})
+        try:
+            with _u.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return {"response": []}
+
+    fixtures = _af("/fixtures", {"league": lid, "season": season}).get("response", [])
+    rows = []
+    league_label = None
+    checked = 0
+    seen = set()
+    for f in fixtures:
+        lg = f.get("league") or {}
+        if league_label is None and (lg.get("name")):
+            league_label = ((lg.get("country") or "") + " - " + (lg.get("name") or "")).strip(" -")
+        st = ((f.get("fixture") or {}).get("status") or {}).get("short")
+        if st not in ("FT", "AET", "PEN"):
+            continue
+        g = f.get("goals") or {}
+        fth, fta = g.get("home"), g.get("away")
+        if fth is None or fta is None or (fth + fta) == 0:
+            continue
+        fid = (f.get("fixture") or {}).get("id")
+        if fid in seen:
+            continue
+        seen.add(fid)
+        teams = f.get("teams") or {}
+        home = (teams.get("home") or {}).get("name")
+        away = (teams.get("away") or {}).get("name")
+        htid = (teams.get("home") or {}).get("id")
+        dd = (f.get("fixture") or {}).get("date") or ""
+        if len(dd) < 10:
+            continue
+        date_disp = "%s/%s/%s" % (dd[8:10], dd[5:7], dd[0:4])
+        checked += 1
+        ev = _af("/fixtures/events", {"fixture": fid}).get("response", [])
+        goals = []
+        for e in ev:
+            if e.get("type") != "Goal":
+                continue
+            t = e.get("time") or {}
+            goals.append(((t.get("elapsed") or 0), (t.get("extra") or 0), (e.get("team") or {}).get("id")))
+        goals.sort(key=lambda x: x[0] + x[1])
+        if not goals or (goals[0][0] + goals[0][1]) > 16:
+            continue
+        sc = (f.get("score") or {}).get("halftime") or {}
+        hh, ha = sc.get("home") or 0, sc.get("away") or 0
+        st_h, st_a = fth - hh, fta - ha
+        time_str = dd[11:16] if len(dd) >= 16 else ""
+
+        def _mm(m, x):
+            return (str(m) + "+" + str(x)) if x else str(m)
+        gcell = ", ".join(('<span class="away-goal">' + _mm(m, x) + "'</span>") if t != htid else (_mm(m, x) + "'")
+                          for m, x, t in goals)
+        lname = league_label or str(lid)
+        row = ("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+               "<td>%d-%d</td><td>%d-%d</td><td>%d-%d</td><td>%s</td><td>-</td><td>-</td><td>-</td></tr>") % (
+               season, date_disp, time_str, home, away, lname, hh, ha, st_h, st_a, fth, fta, gcell)
+        rows.append({"fixture_id": fid, "date": date_disp, "home": home, "away": away, "row": row})
+        time.sleep(0.1)  # rispetta il rate limit api-sports
+    return jsonify({"league_id": lid, "league_name": league_label, "season": season,
+                    "checked": checked, "count": len(rows), "rows": rows})
+
 @app.route("/api/admin/delete-fixture", methods=["DELETE"])
 def admin_delete_fixture():
     expected_token = os.environ.get("INGEST_TOKEN", "")
