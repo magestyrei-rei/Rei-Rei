@@ -528,6 +528,7 @@ def _bet_market_win(market, fh, fa):
         'over_0_5': tot > 0, 'over_1_5': tot > 1, 'over_2_5': tot > 2,
         'over_3_5': tot > 3, 'over_4_5': tot > 4,
         'under_1_5': tot < 2, 'under_2_5': tot < 3, 'under_3_5': tot < 4, 'under_4_5': tot < 5,
+        'over_1_5_ht': tot > 1, 'over_2_5_ht': tot > 2, 'under_1_5_ht': tot < 2, 'under_2_5_ht': tot < 3,
         'btts_si': btts, 'btts_no': not btts,
         '1': fh > fa, 'X': fh == fa, '2': fa > fh,
     }
@@ -591,7 +592,12 @@ def _bet_base_rate(league_id, market, minute, sh, sa):
                 continue
             if hM != (sh or 0) or aM != (sa or 0):
                 continue
-        w = _bet_market_win(market, fh, fa)
+        if market.endswith('_ht'):
+            htM = sum(1 for (mn, aw) in tl if mn <= 45)
+            _hthr = {'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}.get(market)
+            w = None if _hthr is None else ((htM >= _hthr) if market.startswith('over_') else (htM < _hthr))
+        else:
+            w = _bet_market_win(market, fh, fa)
         if w is None:
             continue
         matched += 1
@@ -635,7 +641,11 @@ def _settle_user_bets(limit=80):
             if rec is None:
                 continue
             fh, fa = rec.get('ft_home'), rec.get('ft_away')
-            w = _bet_market_win(r.get('market'), fh, fa)
+            _mk = r.get('market')
+            if _mk and _mk.endswith('_ht'):
+                w = _bet_market_win(_mk, rec.get('ht_home'), rec.get('ht_away'))
+            else:
+                w = _bet_market_win(_mk, fh, fa)
             if w is None:
                 continue
             stake = r.get('stake') or 1.0
@@ -683,7 +693,12 @@ def _settle_user_bets(limit=80):
                 continue  # non ancora finita: si settla al prossimo giro via fixture_id
             g = fx.get('goals') or {}
             fh, fa = g.get('home'), g.get('away')
-            w = _bet_market_win(r.get('market'), fh, fa)
+            _mk = r.get('market')
+            if _mk and _mk.endswith('_ht'):
+                _hts = (fx.get('score') or {}).get('halftime') or {}
+                w = _bet_market_win(_mk, _hts.get('home'), _hts.get('away'))
+            else:
+                w = _bet_market_win(_mk, fh, fa)
             if w is None:
                 continue
             stake = r.get('stake') or 1.0
@@ -1435,6 +1450,7 @@ def register(app):
                 return jsonify({'error': 'parametro league richiesto'}), 400
             OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
             UNDER = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
+            HT = {'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             rows = con.execute(
@@ -1467,6 +1483,12 @@ def register(app):
                     if totM >= thr:
                         continue
                     win = (fh + fa) < thr
+                elif market in HT:
+                    thr = HT[market]
+                    if totM >= thr:
+                        continue
+                    htM = sum(1 for (mn, aw) in tl if mn <= 45)
+                    win = (htM >= thr) if market.startswith('over_') else (htM < thr)
                 elif market == 'btts_si':
                     if hM > 0 and aM > 0:
                         continue
@@ -1578,12 +1600,17 @@ def register(app):
                        ('over_3_5', 'Over 3.5'), ('over_4_5', 'Over 4.5'),
                        ('under_1_5', 'Under 1.5'), ('under_2_5', 'Under 2.5'),
                        ('under_3_5', 'Under 3.5'), ('under_4_5', 'Under 4.5'),
+                       ('over_1_5_ht', 'Over 1.5 HT'), ('over_2_5_ht', 'Over 2.5 HT'),
+                       ('under_1_5_ht', 'Under 1.5 HT'), ('under_2_5_ht', 'Under 2.5 HT'),
                        ('btts_si', 'BTTS Si'), ('btts_no', 'BTTS No'),
                        ('1', '1 (Casa)'), ('X', 'X (Pari)'), ('2', '2 (Ospite)')]
             OVER_THR = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5,
-                        'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
+                        'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5,
+                        'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}
             out = []
             for mk, label in markets:
+                if mk.endswith('_ht') and minute >= 45:
+                    continue
                 if mk in OVER_THR and total >= OVER_THR[mk]:
                     continue
                 if mk in ('btts_si', 'btts_no') and sh > 0 and sa > 0:
@@ -1618,6 +1645,7 @@ def register(app):
             else:
                 OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
                 UNDER = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
+                HT = {'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}
                 con = _sqlite3.connect(_LOCAL_DB)
                 con.row_factory = _sqlite3.Row
                 rows = con.execute(
@@ -1645,6 +1673,12 @@ def register(app):
                         if totM >= thr:
                             continue
                         win = (fh + fa) < thr
+                    elif market in HT:
+                        thr = HT[market]
+                        if totM >= thr:
+                            continue
+                        htM = sum(1 for (mn, aw) in tl if mn <= 45)
+                        win = (htM >= thr) if market.startswith('over_') else (htM < thr)
                     elif market == 'btts_si':
                         if hM > 0 and aM > 0:
                             continue
