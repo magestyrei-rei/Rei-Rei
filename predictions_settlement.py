@@ -1648,12 +1648,10 @@ def register(app):
                 HT = {'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}
                 con = _sqlite3.connect(_LOCAL_DB)
                 con.row_factory = _sqlite3.Row
-                rows = con.execute(
-                    "SELECT league_id, goals_html, goals_text, ft_home, ft_away FROM matches").fetchall()
                 names = {r['id']: r['name'] for r in con.execute("SELECT id, name FROM leagues")}
-                con.close()
                 groups = {}
-                for r in rows:
+                # streaming: una riga alla volta dal cursore (niente .fetchall(): non carica le 93k partite in RAM insieme)
+                for r in con.execute("SELECT league_id, goals_html, goals_text, ft_home, ft_away FROM matches"):
                     fh, fa = r['ft_home'], r['ft_away']
                     if fh is None or fa is None:
                         continue
@@ -1696,6 +1694,7 @@ def register(app):
                     g[0] += 1
                     if win:
                         g[1] += 1
+                con.close()
                 full = []
                 for (lid, st), (n, w) in groups.items():
                     br = round(100.0 * w / n, 1) if n else 0.0
@@ -1703,6 +1702,12 @@ def register(app):
                                  'state': st, 'n': n, 'base_rate': br,
                                  'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
                 _SCANNER_CACHE[ckey] = (now, full)
+                # eviction: libera le voci scadute (>600s) e tieni al massimo le 12 piu' recenti
+                for _k in [k for k, v in list(_SCANNER_CACHE.items()) if now - v[0] > 600]:
+                    _SCANNER_CACHE.pop(_k, None)
+                if len(_SCANNER_CACHE) > 12:
+                    for _k in sorted(_SCANNER_CACHE, key=lambda k: _SCANNER_CACHE[k][0])[:len(_SCANNER_CACHE) - 12]:
+                        _SCANNER_CACHE.pop(_k, None)
             out = [x for x in full if x['n'] >= min_n and (not state_filter or x['state'] == state_filter)]
             out.sort(key=lambda x: -x['base_rate'])
             out = out[:60]
