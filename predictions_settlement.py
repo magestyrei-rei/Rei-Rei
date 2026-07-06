@@ -1729,10 +1729,12 @@ def register(app):
             is_ht = market.endswith('_ht')
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
-            per = {}
-            tot_n = tot_w = 0
+            dates = []
+            wins = []
+            tot_w = 0
             for r in con.execute(
-                    "SELECT season, ft_home, ft_away, ht_home, ht_away FROM matches WHERE league_id=?", (lid,)):
+                    "SELECT date_str, ft_home, ft_away, ht_home, ht_away FROM matches WHERE league_id=? "
+                    "ORDER BY sort_date ASC, time_str ASC", (lid,)):
                 fh, fa = r['ft_home'], r['ft_away']
                 if fh is None or fa is None:
                     continue
@@ -1745,22 +1747,14 @@ def register(app):
                     w = _bet_market_win(market, fh, fa)
                 if w is None:
                     continue
-                s = r['season']
-                g = per.setdefault(s, [0, 0])
-                g[0] += 1
-                if w:
-                    g[1] += 1
-                tot_n += 1
+                dates.append(r['date_str'])
+                wins.append(1 if w else 0)
                 if w:
                     tot_w += 1
             con.close()
-            seasons = []
-            for s in sorted(k for k in per if k is not None):
-                n, wv = per[s]
-                seasons.append({'season': s, 'n': n,
-                                'base_rate': round(100.0 * wv / n, 1) if n else 0.0})
-            avg = round(100.0 * tot_w / tot_n, 1) if tot_n else 0.0
+            n = len(wins)
+            avg = round(100.0 * tot_w / n, 1) if n else 0.0
             return jsonify({'league_id': lid, 'market': market, 'avg': avg,
-                            'total_n': tot_n, 'seasons': seasons})
+                            'total_n': n, 'dates': dates, 'wins': wins})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500

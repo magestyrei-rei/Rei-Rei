@@ -88,7 +88,7 @@
 
   <section class="view" id="view-andamento">
     <style>#view-andamento select{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
-    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4C8; <b>Come si usa:</b> scegli <b>campionato + mercato</b> &rarr; un grafico a <b>barre per stagione</b> della % con cui quel mercato si verifica (sul totale delle partite early-goal della lega). <b>Verde</b> = stagione sopra la media storica, <b>rossa</b> = sotto; la linea tratteggiata &egrave; la <b>media</b>, l&#39;ultima barra (bordata) &egrave; la <b>stagione attuale</b>. Vedi a colpo d&#39;occhio massimi/minimi storici e come sta andando ora.</div>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4C8; <b>Come si usa:</b> scegli <b>campionato + mercato + finestra</b> (ultime 10/20/30 partite) &rarr; un grafico a <b>candele</b> del tasso di quel mercato sulle ultime N partite: ogni candela mostra apertura/max/min/chiusura del tasso in quel tratto, <b>verde se sale, rossa se scende</b>. Le linee tratteggiate sono <b>media storica</b>, <b>max</b> e <b>min</b> storici. Si aggiorna da solo man mano che escono nuovi risultati.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
       <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="and-league" style="min-width:180px"></select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="and-market">
@@ -99,6 +99,8 @@
         <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
         <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
       </select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Finestra</label><select id="and-window" onchange="loadAndamento()">
+        <option value="10">ultime 10</option><option value="20" selected>ultime 20</option><option value="30">ultime 30</option></select></div>
       <button onclick="loadAndamento()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
     </div>
     <div id="and-chart"><div style="color:#64748b;font-size:13px">Scegli campionato e mercato, poi premi Calcola.</div></div>
@@ -563,7 +565,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "read") loadReadInit();
     if (t.dataset.view === "scan") loadScannerInit();
     if (t.dataset.view === "comeback") loadComebackInit();
-    if (t.dataset.view === "andamento") loadAndamentoInit();
+    if (t.dataset.view === "andamento") { loadAndamentoInit(); startAndamentoRefresh(); } else { stopAndamentoRefresh(); }
   });
 });
 
@@ -1513,7 +1515,7 @@ async function loadComebacks(){
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
 
-// === Andamento mercato (grafico a barre per stagione) ===
+// === Andamento mercato (candele, tasso su finestra mobile) ===
 var _andLeaguesLoaded=false;
 async function loadAndamentoInit(){
   if(_andLeaguesLoaded)return;
@@ -1526,57 +1528,69 @@ async function loadAndamentoInit(){
     arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
   }catch(e){}
 }
+var _andTimer=null;
 async function loadAndamento(){
   var el=document.getElementById('and-chart');
   var lid=document.getElementById('and-league').value;
   var market=document.getElementById('and-market').value;
+  var N=parseInt(document.getElementById('and-window').value)||20;
   if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
-  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  if(el.innerHTML.indexOf('svg')<0) el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
   try{
-    var r=await fetch('/api/market-trend?league='+lid+'&market='+market);var d=await r.json();
+    var r=await fetch('/api/market-trend?league='+lid+'&market='+market,{cache:'no-store'});var d=await r.json();
     if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
-    var S=d.seasons||[];
-    if(!S.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun dato per questo mercato.</div>';return;}
-    var avg=d.avg;
-    var rates=S.map(function(x){return x.base_rate;});
-    var maxR=Math.max.apply(null,rates);
-    var top=Math.max(20,Math.min(100,Math.ceil((maxR+5)/10)*10));
-    var mL=40,mR=14,mT=14,mB=42,colW=46,barW=30,chartH=200;
-    var W=mL+S.length*colW+mR,H=mT+chartH+mB;
-    function y(v){return mT+chartH-(v/top)*chartH;}
+    var wins=d.wins||[],avg=d.avg;
+    if(wins.length<N+2){el.innerHTML='<div style="color:#64748b;font-size:13px">Dati insufficienti per la finestra '+N+' (servono almeno '+(N+2)+' partite, ce ne sono '+wins.length+').</div>';return;}
+    var roll=[],sum=0;
+    for(var i=0;i<wins.length;i++){
+      sum+=wins[i];
+      if(i>=N) sum-=wins[i-N];
+      if(i>=N-1) roll.push(100*sum/N);
+    }
+    var hMax=Math.max.apply(null,roll),hMin=Math.min.apply(null,roll);
+    var grp=3,maxC=42,startI=Math.max(0,roll.length-maxC*grp),C=[];
+    for(var j=startI;j<roll.length;j+=grp){
+      var seg=roll.slice(j,Math.min(j+grp,roll.length));
+      C.push({o:seg[0],c:seg[seg.length-1],h:Math.max.apply(null,seg),l:Math.min.apply(null,seg)});
+    }
+    var lo=Math.min(hMin,avg,Math.min.apply(null,C.map(function(x){return x.l;})));
+    var hi=Math.max(hMax,avg,Math.max.apply(null,C.map(function(x){return x.h;})));
+    var yMin=Math.max(0,Math.floor((lo-2)/5)*5),yMax=Math.min(100,Math.ceil((hi+2)/5)*5);
+    if(yMax<=yMin) yMax=yMin+5;
+    var mL=40,mR=54,mT=12,mB=18,slot=Math.max(9,Math.min(16,Math.floor(560/C.length))),bodyW=Math.max(4,slot-6),chartH=210;
+    var W=mL+C.length*slot+mR,H=mT+chartH+mB;
+    function y(v){return mT+chartH-((v-yMin)/(yMax-yMin))*chartH;}
     var svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:'+Math.max(W,340)+'px;height:auto">';
-    [0,top/2,top].forEach(function(gv){
+    for(var gv=yMin;gv<=yMax+0.1;gv+=(yMax-yMin)/4){
       var gy=y(gv);
-      svg+='<line x1="'+mL+'" y1="'+gy+'" x2="'+(W-mR)+'" y2="'+gy+'" stroke="#1e293b" stroke-width="1"/>';
+      svg+='<line x1="'+mL+'" y1="'+gy+'" x2="'+(W-mR)+'" y2="'+gy+'" stroke="#16202e" stroke-width="1"/>';
       svg+='<text x="'+(mL-4)+'" y="'+(gy+3)+'" text-anchor="end" font-size="9" fill="#64748b">'+Math.round(gv)+'%</text>';
-    });
-    var ay=y(avg);
-    svg+='<line x1="'+mL+'" y1="'+ay+'" x2="'+(W-mR)+'" y2="'+ay+'" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="5,3"/>';
-    svg+='<text x="'+(W-mR)+'" y="'+(ay-3)+'" text-anchor="end" font-size="9" fill="#38bdf8">media '+avg+'%</text>';
-    S.forEach(function(s,i){
-      var bx=mL+i*colW+(colW-barW)/2;
-      var by=y(s.base_rate),bh=(mT+chartH)-by;
-      var isCur=(i===S.length-1);
-      var col=s.base_rate>=avg?'#22c55e':'#ef4444';
-      svg+='<rect x="'+bx+'" y="'+by+'" width="'+barW+'" height="'+Math.max(0,bh)+'" rx="2" fill="'+col+'" opacity="'+(isCur?1:0.8)+'"'+(isCur?' stroke="#e2e8f0" stroke-width="1.5"':'')+'><title>Stagione '+s.season+': '+s.base_rate+'% (n='+s.n+')</title></rect>';
-      svg+='<text x="'+(bx+barW/2)+'" y="'+(by-3)+'" text-anchor="middle" font-size="9" fill="#cbd5e1">'+s.base_rate+'</text>';
-      svg+='<text x="'+(bx+barW/2)+'" y="'+(mT+chartH+13)+'" text-anchor="middle" font-size="9" fill="'+(isCur?'#e2e8f0':'#94a3b8')+'"'+(isCur?' font-weight="700"':'')+'>'+s.season+'</text>';
-      svg+='<text x="'+(bx+barW/2)+'" y="'+(mT+chartH+25)+'" text-anchor="middle" font-size="8" fill="#475569">n'+s.n+'</text>';
+    }
+    function refLine(v,color,lab){
+      var ry=y(v);
+      svg+='<line x1="'+mL+'" y1="'+ry+'" x2="'+(W-mR)+'" y2="'+ry+'" stroke="'+color+'" stroke-width="1" stroke-dasharray="4,3" opacity="0.9"/>';
+      svg+='<text x="'+(W-mR+3)+'" y="'+(ry+3)+'" font-size="8.5" fill="'+color+'">'+lab+' '+v.toFixed(0)+'%</text>';
+    }
+    refLine(hMax,'#f59e0b','max'); refLine(hMin,'#a78bfa','min'); refLine(avg,'#38bdf8','media');
+    C.forEach(function(k,i){
+      var cx=mL+i*slot+slot/2, up=k.c>=k.o, col=up?'#22c55e':'#ef4444';
+      svg+='<line x1="'+cx+'" y1="'+y(k.h)+'" x2="'+cx+'" y2="'+y(k.l)+'" stroke="'+col+'" stroke-width="1"/>';
+      var by=y(Math.max(k.o,k.c)),bh=Math.max(1.5,Math.abs(y(k.o)-y(k.c)));
+      svg+='<rect x="'+(cx-bodyW/2)+'" y="'+by+'" width="'+bodyW+'" height="'+bh+'" fill="'+col+'"><title>apre '+k.o.toFixed(0)+'% chiude '+k.c.toFixed(0)+'% (max '+k.h.toFixed(0)+' min '+k.l.toFixed(0)+')</title></rect>';
     });
     svg+='</svg>';
-    var maxS=S.reduce(function(a,b){return b.base_rate>a.base_rate?b:a;});
-    var minS=S.reduce(function(a,b){return b.base_rate<a.base_rate?b:a;});
-    var cur=S[S.length-1];
-    var diffN=cur.base_rate-avg;
+    var curRoll=roll[roll.length-1];
     var out='<div style="overflow-x:auto">'+svg+'</div>';
-    out+='<div style="margin-top:10px;font-size:12.5px;color:#cbd5e1;line-height:1.7">'
-      +'Media storica: <b>'+avg+'%</b> ('+d.total_n+' partite)<br>'
-      +'&#x25B2; Massimo: <b>'+maxS.season+'</b> ('+maxS.base_rate+'%) &nbsp;&middot;&nbsp; &#x25BC; Minimo: <b>'+minS.season+'</b> ('+minS.base_rate+'%)<br>'
-      +'Stagione attuale <b>'+cur.season+'</b>: <b style="color:'+(cur.base_rate>=avg?'#22c55e':'#f87171')+'">'+cur.base_rate+'%</b> ('+(diffN>=0?'+':'')+diffN.toFixed(1)+'% vs media)'
+    out+='<div style="margin-top:8px;font-size:12.5px;color:#cbd5e1;line-height:1.7">'
+      +'Candele = tasso sulle <b>ultime '+N+' partite</b> (a sinistra le pi&ugrave; vecchie, a destra le recenti). Verde = sale, rossa = scende.<br>'
+      +'<span style="color:#38bdf8">--- media storica '+avg+'%</span> &middot; <span style="color:#f59e0b">--- max '+hMax.toFixed(0)+'%</span> &middot; <span style="color:#a78bfa">--- min '+hMin.toFixed(0)+'%</span><br>'
+      +'Adesso (ultime '+N+'): <b style="color:'+(curRoll>=avg?'#22c55e':'#f87171')+'">'+curRoll.toFixed(0)+'%</b> ('+((curRoll-avg)>=0?'+':'')+(curRoll-avg).toFixed(0)+'% vs media) &middot; '+d.total_n+' partite totali'
       +'</div>';
     el.innerHTML=out;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
+function startAndamentoRefresh(){ stopAndamentoRefresh(); if(document.getElementById('and-league').value) loadAndamento(); _andTimer=setInterval(function(){ if(document.getElementById('and-league').value) loadAndamento(); },90000); }
+function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTimer=null;} }
 
 </script>
 </body>
