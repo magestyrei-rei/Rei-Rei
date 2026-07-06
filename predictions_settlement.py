@@ -1715,3 +1715,52 @@ def register(app):
                             'state': state_filter or 'tutti', 'min_n': min_n, 'rows': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/market-trend')
+    def api_market_trend():
+        """Andamento storico di un mercato per un campionato: base rate PER STAGIONE
+        (media grezza sul totale delle partite early-goal della lega, non condizionata a
+        minuto/stato) + media complessiva. Per il grafico a barre per stagione."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            market = (request.args.get('market') or 'over_2_5').strip()
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            is_ht = market.endswith('_ht')
+            con = _sqlite3.connect(_LOCAL_DB)
+            con.row_factory = _sqlite3.Row
+            per = {}
+            tot_n = tot_w = 0
+            for r in con.execute(
+                    "SELECT season, ft_home, ft_away, ht_home, ht_away FROM matches WHERE league_id=?", (lid,)):
+                fh, fa = r['ft_home'], r['ft_away']
+                if fh is None or fa is None:
+                    continue
+                if is_ht:
+                    hh, ha = r['ht_home'], r['ht_away']
+                    if hh is None or ha is None:
+                        continue
+                    w = _bet_market_win(market, hh, ha)
+                else:
+                    w = _bet_market_win(market, fh, fa)
+                if w is None:
+                    continue
+                s = r['season']
+                g = per.setdefault(s, [0, 0])
+                g[0] += 1
+                if w:
+                    g[1] += 1
+                tot_n += 1
+                if w:
+                    tot_w += 1
+            con.close()
+            seasons = []
+            for s in sorted(k for k in per if k is not None):
+                n, wv = per[s]
+                seasons.append({'season': s, 'n': n,
+                                'base_rate': round(100.0 * wv / n, 1) if n else 0.0})
+            avg = round(100.0 * tot_w / tot_n, 1) if tot_n else 0.0
+            return jsonify({'league_id': lid, 'market': market, 'avg': avg,
+                            'total_n': tot_n, 'seasons': seasons})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
