@@ -529,6 +529,9 @@ def _bet_market_win(market, fh, fa):
         'over_3_5': tot > 3, 'over_4_5': tot > 4,
         'under_1_5': tot < 2, 'under_2_5': tot < 3, 'under_3_5': tot < 4, 'under_4_5': tot < 5,
         'over_1_5_ht': tot > 1, 'over_2_5_ht': tot > 2, 'under_1_5_ht': tot < 2, 'under_2_5_ht': tot < 3,
+        'over_0_5_st': tot > 0, 'over_1_5_st': tot > 1, 'over_2_5_st': tot > 2,
+        'under_1_5_st': tot < 2, 'under_2_5_st': tot < 3,
+        'gol_casa_st': fh > 0, 'gol_ospite_st': fa > 0,
         'btts_si': btts, 'btts_no': not btts,
         '1': fh > fa, 'X': fh == fa, '2': fa > fh,
     }
@@ -1727,24 +1730,27 @@ def register(app):
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
             is_ht = market.endswith('_ht')
+            is_st = market.endswith('_st')
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             dates = []
             wins = []
             tot_w = 0
             for r in con.execute(
-                    "SELECT date_str, ft_home, ft_away, ht_home, ht_away FROM matches WHERE league_id=? "
+                    "SELECT date_str, ft_home, ft_away, ht_home, ht_away, st_home, st_away FROM matches WHERE league_id=? "
                     "ORDER BY sort_date ASC, time_str ASC", (lid,)):
                 fh, fa = r['ft_home'], r['ft_away']
                 if fh is None or fa is None:
                     continue
                 if is_ht:
-                    hh, ha = r['ht_home'], r['ht_away']
-                    if hh is None or ha is None:
-                        continue
-                    w = _bet_market_win(market, hh, ha)
+                    a, b = r['ht_home'], r['ht_away']
+                elif is_st:
+                    a, b = r['st_home'], r['st_away']
                 else:
-                    w = _bet_market_win(market, fh, fa)
+                    a, b = fh, fa
+                if a is None or b is None:
+                    continue
+                w = _bet_market_win(market, a, b)
                 if w is None:
                     continue
                 dates.append(r['date_str'])
