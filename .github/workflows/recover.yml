@@ -1,0 +1,67 @@
+name: Recupero partite (buco archiviatore)
+
+# Recupera le partite early-goal mancanti in un intervallo di date (es. quando la
+# chiave API era scaduta). Cicla ogni giorno chiamando /api/earlygoal-sync?date=YYYY-MM-DD
+# (che le inserisce nel DB vivo + restituisce le righe), scrive su data/ con dedup,
+# poi ricostruisce football.db.gz e fa il deploy. Lancialo a mano (Run workflow).
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_from:
+        description: "Prima data da recuperare (YYYY-MM-DD)"
+        required: true
+        default: "2026-06-01"
+      date_to:
+        description: "Ultima data (YYYY-MM-DD)"
+        required: true
+        default: "2026-07-10"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-db
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Recupero giorno per giorno -> data/
+        env:
+          TICK_TOKEN: ${{ secrets.TICK_AUTH_TOKEN }}
+        run: |
+          d="${{ inputs.date_from }}"
+          end=$(date -I -d "${{ inputs.date_to }} + 1 day")
+          while [ "$d" != "$end" ]; do
+            echo "== recupero $d =="
+            curl -fsSL --max-time 175 --retry 2 --retry-delay 10 \
+              "https://rei-rei.onrender.com/api/earlygoal-sync?token=${TICK_TOKEN}&date=$d" -o sync.json \
+              || echo '{"matches":[]}' > sync.json
+            python scripts/archive_write.py sync.json || true
+            rm -f sync.json
+            d=$(date -I -d "$d + 1 day")
+            sleep 4
+          done
+
+      - name: Rebuild football.db.gz da data/*.html
+        run: python scripts/rebuild_from_html.py
+
+      - name: Commit data/ + football.db.gz
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git add data/ football.db.gz
+          git diff --staged --quiet || (git commit -m "recover: partite ${{ inputs.date_from }} -> ${{ inputs.date_to }}" && git pull --rebase origin main && git push)
+
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "$RENDER_HOOK" || true
+        env:
+          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}

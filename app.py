@@ -819,7 +819,11 @@ def api_earlygoal_sync():
     monitored = set(r["id"] for r in query("SELECT id FROM leagues"))
     names = {r["id"]: r["name"] for r in query("SELECT id, name FROM leagues")}
     today = _dt.datetime.utcnow().date()
-    dates = [(today - _dt.timedelta(days=d)).strftime("%Y-%m-%d") for d in (0, 1)]
+    _dparam = (request.args.get("date") or "").strip()
+    if len(_dparam) == 10 and _dparam[4] == "-" and _dparam[7] == "-":
+        dates = [_dparam]              # recupero mirato: una data specifica (YYYY-MM-DD)
+    else:
+        dates = [(today - _dt.timedelta(days=d)).strftime("%Y-%m-%d") for d in (0, 1)]
 
     added = []
     checked = 0
