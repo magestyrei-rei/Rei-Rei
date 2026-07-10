@@ -809,12 +809,18 @@ def api_earlygoal_sync():
 
     def _af(path, params):
         url = "https://v3.football.api-sports.io" + path + "?" + _up.urlencode(params)
-        req = _u.Request(url, headers={"x-apisports-key": key})
-        try:
-            with _u.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return {"response": []}
+        for attempt in range(4):
+            try:
+                req = _u.Request(url, headers={"x-apisports-key": key})
+                with _u.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                if data.get("errors"):        # rate-limit/quota -> backoff e ritenta
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                return data
+            except Exception:
+                time.sleep(2 * (attempt + 1))
+        return {"response": []}
 
     monitored = set(r["id"] for r in query("SELECT id FROM leagues"))
     names = {r["id"]: r["name"] for r in query("SELECT id, name FROM leagues")}
