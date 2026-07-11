@@ -532,6 +532,7 @@ def _bet_market_win(market, fh, fa):
         'over_0_5_st': tot > 0, 'over_1_5_st': tot > 1, 'over_2_5_st': tot > 2,
         'under_1_5_st': tot < 2, 'under_2_5_st': tot < 3,
         'gol_casa_st': fh > 0, 'gol_ospite_st': fa > 0,
+        'gol_casa': fh > 0, 'gol_ospite': fa > 0,
         'btts_si': btts, 'btts_no': not btts,
         '1': fh > fa, 'X': fh == fa, '2': fa > fh,
     }
@@ -1729,8 +1730,12 @@ def register(app):
             market = (request.args.get('market') or 'over_2_5').strip()
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
-            is_ht = market.endswith('_ht')
-            is_st = market.endswith('_st')
+            # periodo dal parametro (FT/HT/ST); retro-compat: dedotto dal suffisso del market
+            period = (request.args.get('period') or '').strip().upper()
+            if period not in ('FT', 'HT', 'ST'):
+                period = 'HT' if market.endswith('_ht') else ('ST' if market.endswith('_st') else 'FT')
+            # market base: togli l'eventuale suffisso di periodo -> stessa chiave in ogni periodo
+            base = market[:-3] if (market.endswith('_ht') or market.endswith('_st')) else market
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             dates = []
@@ -1742,15 +1747,15 @@ def register(app):
                 fh, fa = r['ft_home'], r['ft_away']
                 if fh is None or fa is None:
                     continue
-                if is_ht:
+                if period == 'HT':
                     a, b = r['ht_home'], r['ht_away']
-                elif is_st:
+                elif period == 'ST':
                     a, b = r['st_home'], r['st_away']
                 else:
                     a, b = fh, fa
                 if a is None or b is None:
                     continue
-                w = _bet_market_win(market, a, b)
+                w = _bet_market_win(base, a, b)
                 if w is None:
                     continue
                 dates.append(r['date_str'])
@@ -1760,7 +1765,7 @@ def register(app):
             con.close()
             n = len(wins)
             avg = round(100.0 * tot_w / n, 1) if n else 0.0
-            return jsonify({'league_id': lid, 'market': market, 'avg': avg,
+            return jsonify({'league_id': lid, 'market': market, 'period': period, 'avg': avg,
                             'total_n': n, 'dates': dates, 'wins': wins})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500

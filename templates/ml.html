@@ -87,20 +87,18 @@
   </div>
 
   <section class="view" id="view-andamento">
-    <style>#view-andamento select{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <style>#view-andamento select{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-andamento optgroup{background:#0b1220;color:#7dd3fc;font-weight:600}#view-andamento option{background:#0f172a;color:#e2e8f0;font-weight:400}</style>
     <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4C8; <b>Come si usa:</b> scegli <b>campionato + mercato + finestra</b> (ultime 10/20/30 partite) &rarr; un grafico a <b>candele</b> del tasso di quel mercato sulle ultime N partite: ogni candela mostra apertura/max/min/chiusura del tasso in quel tratto, <b>verde se sale, rossa se scende</b>. Le linee tratteggiate sono <b>media storica</b>, <b>max</b> e <b>min</b> storici. Si aggiorna da solo man mano che escono nuovi risultati.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
       <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="and-league" style="min-width:180px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Periodo</label><select id="and-period" onchange="andPeriodChange()">
+        <option value="FT" selected>FT &middot; finale</option><option value="HT">HT &middot; 1&deg; tempo</option><option value="ST">ST &middot; 2&deg; tempo</option>
+      </select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Mercato</label><select id="and-market">
-        <option value="over_1_5">Over 1.5</option>
-        <option value="over_2_5" selected>Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option>
-        <option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option>
-        <option value="over_1_5_ht">Over 1.5 HT</option><option value="over_2_5_ht">Over 2.5 HT</option><option value="under_1_5_ht">Under 1.5 HT</option><option value="under_2_5_ht">Under 2.5 HT</option>
-        <option value="over_0_5_st">Over 0.5 ST</option><option value="over_1_5_st">Over 1.5 ST</option><option value="over_2_5_st">Over 2.5 ST</option>
-        <option value="under_1_5_st">Under 1.5 ST</option><option value="under_2_5_st">Under 2.5 ST</option>
-        <option value="gol_casa_st">Gol Casa ST</option><option value="gol_ospite_st">Gol Ospite ST</option>
-        <option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option>
-        <option value="1">1 (Casa)</option><option value="X">X (Pari)</option><option value="2">2 (Ospite)</option>
+        <optgroup label="Esiti"><option value="1">1 (Casa)</option><option value="X">X (Pareggio)</option><option value="2">2 (Ospite)</option></optgroup>
+        <optgroup label="Gol / BTTS"><option value="btts_si">BTTS Si</option><option value="btts_no">BTTS No</option><option value="gol_casa">Gol Casa</option><option value="gol_ospite">Gol Ospite</option></optgroup>
+        <optgroup label="Over"><option value="over_0_5" id="and-opt-o05" disabled>Over 0.5 (solo ST)</option><option value="over_1_5">Over 1.5</option><option value="over_2_5" selected>Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option></optgroup>
+        <optgroup label="Under"><option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option></optgroup>
       </select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Finestra</label><select id="and-window" onchange="loadAndamento()">
         <option value="10">ultime 10</option><option value="20" selected>ultime 20</option><option value="30">ultime 30</option></select></div>
@@ -1536,11 +1534,13 @@ async function loadAndamento(){
   var el=document.getElementById('and-chart');
   var lid=document.getElementById('and-league').value;
   var market=document.getElementById('and-market').value;
+  var period=document.getElementById('and-period').value;
+  var msel=document.getElementById('and-market');var mkl=(msel.selectedOptions&&msel.selectedOptions[0]?msel.selectedOptions[0].text:market).replace(' (solo ST)','');
   var N=parseInt(document.getElementById('and-window').value)||20;
   if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
   if(el.innerHTML.indexOf('svg')<0) el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
   try{
-    var r=await fetch('/api/market-trend?league='+lid+'&market='+market,{cache:'no-store'});var d=await r.json();
+    var r=await fetch('/api/market-trend?league='+lid+'&market='+market+'&period='+period,{cache:'no-store'});var d=await r.json();
     if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
     var wins=d.wins||[],avg=d.avg;
     if(wins.length<N+2){el.innerHTML='<div style="color:#64748b;font-size:13px">Dati insufficienti per la finestra '+N+' (servono almeno '+(N+2)+' partite, ce ne sono '+wins.length+').</div>';return;}
@@ -1585,12 +1585,19 @@ async function loadAndamento(){
     var curRoll=roll[roll.length-1];
     var out='<div style="overflow-x:auto">'+svg+'</div>';
     out+='<div style="margin-top:8px;font-size:12.5px;color:#cbd5e1;line-height:1.7">'
+      +'Mercato: <b style="color:#7dd3fc">'+mkl+' &middot; '+period+'</b><br>'
       +'Candele = tasso sulle <b>ultime '+N+' partite</b> (a sinistra le pi&ugrave; vecchie, a destra le recenti). Verde = sale, rossa = scende.<br>'
       +'<span style="color:#38bdf8">--- media storica '+avg+'%</span> &middot; <span style="color:#f59e0b">--- max '+hMax.toFixed(0)+'%</span> &middot; <span style="color:#a78bfa">--- min '+hMin.toFixed(0)+'%</span><br>'
       +'Adesso (ultime '+N+'): <b style="color:'+(curRoll>=avg?'#22c55e':'#f87171')+'">'+curRoll.toFixed(0)+'%</b> ('+((curRoll-avg)>=0?'+':'')+(curRoll-avg).toFixed(0)+'% vs media) &middot; '+d.total_n+' partite totali'
       +'</div>';
     el.innerHTML=out;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function andPeriodChange(){
+  var per=document.getElementById('and-period').value;
+  var o05=document.getElementById('and-opt-o05'),sel=document.getElementById('and-market');
+  if(o05){ if(per==='ST'){o05.disabled=false;} else {o05.disabled=true; if(sel.value==='over_0_5') sel.value='over_1_5';} }
+  loadAndamento();
 }
 function startAndamentoRefresh(){ stopAndamentoRefresh(); if(document.getElementById('and-league').value) loadAndamento(); _andTimer=setInterval(function(){ if(document.getElementById('and-league').value) loadAndamento(); },90000); }
 function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTimer=null;} }
