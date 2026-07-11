@@ -1450,21 +1450,34 @@ def register(app):
             minute = int(request.args.get('minute') or 65)
             market = (request.args.get('market') or 'over_1_5').strip()
             first = (request.args.get('first') or '').strip()  # '', 'home', 'away' = chi ha segnato il 1o gol
+            period = (request.args.get('period') or '').strip().upper()
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
+            # periodo dal parametro (FT/HT/ST); retro-compat: dedotto dal suffisso _ht/_st
+            if period not in ('FT', 'HT', 'ST'):
+                period = 'HT' if market.endswith('_ht') else ('ST' if market.endswith('_st') else 'FT')
+            base = market[:-3] if (market.endswith('_ht') or market.endswith('_st')) else market
             OVER = {'over_0_5': 1, 'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
             UNDER = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
-            HT = {'over_1_5_ht': 2, 'over_2_5_ht': 3, 'under_1_5_ht': 2, 'under_2_5_ht': 3}
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             rows = con.execute(
-                "SELECT goals_html, goals_text, ft_home, ft_away FROM matches WHERE league_id=?",
+                "SELECT goals_html, goals_text, ft_home, ft_away, ht_home, ht_away, st_home, st_away FROM matches WHERE league_id=?",
                 (lid,)).fetchall()
             con.close()
             groups = {}
             for r in rows:
                 fh, fa = r['ft_home'], r['ft_away']
                 if fh is None or fa is None:
+                    continue
+                # punteggio finale del periodo scelto
+                if period == 'HT':
+                    pa, pb = r['ht_home'], r['ht_away']
+                elif period == 'ST':
+                    pa, pb = r['st_home'], r['st_away']
+                else:
+                    pa, pb = fh, fa
+                if pa is None or pb is None:
                     continue
                 tl = _bet_timeline(r['goals_html'], r['goals_text'])
                 if first:
@@ -1474,35 +1487,49 @@ def register(app):
                         continue
                 if any(aw is None for (mn, aw) in tl if mn <= minute):
                     continue
+                # stato al minuto (scoreline pieno) -> chiave di raggruppamento
                 hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
                 aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
-                totM = hM + aM
-                if market in OVER:
-                    thr = OVER[market]
-                    if totM >= thr:
+                # gol del PERIODO gia' segnati entro il minuto -> per lo skip "gia' deciso"
+                if period == 'HT':
+                    lim = min(minute, 45)
+                    psa = sum(1 for (mn, aw) in tl if mn <= lim and aw is False)
+                    psb = sum(1 for (mn, aw) in tl if mn <= lim and aw is True)
+                elif period == 'ST':
+                    psa = sum(1 for (mn, aw) in tl if 45 < mn <= minute and aw is False)
+                    psb = sum(1 for (mn, aw) in tl if 45 < mn <= minute and aw is True)
+                else:
+                    psa, psb = hM, aM
+                sofar = psa + psb
+                ptot = pa + pb
+                if base in OVER:
+                    thr = OVER[base]
+                    if sofar >= thr:
                         continue
-                    win = (fh + fa) >= thr
-                elif market in UNDER:
-                    thr = UNDER[market]
-                    if totM >= thr:
+                    win = ptot >= thr
+                elif base in UNDER:
+                    thr = UNDER[base]
+                    if sofar >= thr:
                         continue
-                    win = (fh + fa) < thr
-                elif market in HT:
-                    thr = HT[market]
-                    if totM >= thr:
+                    win = ptot < thr
+                elif base == 'gol_casa':
+                    if psa > 0:
                         continue
-                    htM = sum(1 for (mn, aw) in tl if mn <= 45)
-                    win = (htM >= thr) if market.startswith('over_') else (htM < thr)
-                elif market == 'btts_si':
-                    if hM > 0 and aM > 0:
+                    win = pa > 0
+                elif base == 'gol_ospite':
+                    if psb > 0:
                         continue
-                    win = (fh > 0 and fa > 0)
-                elif market == 'btts_no':
-                    if hM > 0 and aM > 0:
+                    win = pb > 0
+                elif base == 'btts_si':
+                    if psa > 0 and psb > 0:
                         continue
-                    win = not (fh > 0 and fa > 0)
-                elif market in ('1', 'X', '2'):
-                    win = {'1': fh > fa, 'X': fh == fa, '2': fa > fh}[market]
+                    win = (pa > 0 and pb > 0)
+                elif base == 'btts_no':
+                    if psa > 0 and psb > 0:
+                        continue
+                    win = not (pa > 0 and pb > 0)
+                elif base in ('1', 'X', '2'):
+                    win = {'1': pa > pb, 'X': pa == pb, '2': pb > pa}[base]
                 else:
                     continue
                 st = "%d-%d" % (hM, aM)
@@ -1516,7 +1543,7 @@ def register(app):
                 out.append({'state': st, 'n': n, 'wins': w, 'base_rate': br,
                             'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
             out.sort(key=lambda x: -x['n'])
-            return jsonify({'league_id': lid, 'minute': minute, 'market': market,
+            return jsonify({'league_id': lid, 'minute': minute, 'market': market, 'period': period,
                             'first': first or 'qualsiasi', 'segments': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
