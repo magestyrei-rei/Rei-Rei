@@ -509,6 +509,7 @@ td.odds-cell.no-o{color:#1e2d40}
           <div class="table-wrap" style="overflow-x:auto;margin-top:10px">
             <table class="m-table" style="width:100%;min-width:580px">
               <thead><tr>
+                <th style="text-align:center">#</th>
                 <th>Data</th>
                 <th>Campionato</th>
                 <th style="text-align:right">Casa</th>
@@ -518,7 +519,7 @@ td.odds-cell.no-o{color:#1e2d40}
                 <th style="text-align:center">MinÃ¢ÂÂ½</th>
               </tr></thead>
               <tbody id="egh-tbody">
-                <tr><td colspan="7" style="text-align:center;padding:24px;opacity:.5">Attiva il tab per caricare le partiteÃ¢ÂÂ¦</td></tr>
+                <tr><td colspan="8" style="text-align:center;padding:24px;opacity:.5">Attiva il tab per caricare le partiteÃ¢ÂÂ¦</td></tr>
               </tbody>
             </table>
           </div>
@@ -950,11 +951,11 @@ async function loadEgHistory() {
   const cnt   = document.getElementById('egh-count');
   const tbody = document.getElementById('egh-tbody');
   if (!league) {
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;opacity:.6">Seleziona un campionato â</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;opacity:.6">Seleziona un campionato â</td></tr>';
     if (cnt) cnt.textContent = '';
     return;
   }
-  if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;opacity:.6">Caricamento...</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;opacity:.6">Caricamento...</td></tr>';
   try {
     const lid = _eghMap[league];
     const r = await fetch('/api/leagues/' + lid);
@@ -962,11 +963,12 @@ async function loadEgHistory() {
     const matches = d.recent || [];
     if (cnt) cnt.textContent = matches.length + ' partite';
     if (!matches.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;opacity:.6">Nessuna partita trovata</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;opacity:.6">Nessuna partita trovata</td></tr>';
       return;
     }
-    tbody.innerHTML = matches.map(function(m) {
+    tbody.innerHTML = matches.map(function(m, i) {
       return '<tr>' +
+        '<td style="text-align:center;opacity:.6;font-weight:600">' + (i + 1) + '</td>' +
         '<td>' + (m.date_str || '') + '</td>' +
         '<td style="opacity:.8;font-size:.85rem">' + (d.name || '') + '</td>' +
         '<td style="text-align:right;font-weight:600">' + (m.home_team || '') + '</td>' +
@@ -977,7 +979,7 @@ async function loadEgHistory() {
         '</tr>';
     }).join('');
   } catch(e) {
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:#e57373;text-align:center">Errore: ' + e.message + '</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="color:#e57373;text-align:center">Errore: ' + e.message + '</td></tr>';
   }
 }
 
