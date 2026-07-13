@@ -58,6 +58,25 @@ def to_float(s):
     except (ValueError, TypeError):
         return None
 
+def derive_ht_from_goals(g_html):
+    """(ht_home, ht_away) contando i gol con minuto <=45 (fine 1T, recuperi 45+ inclusi).
+    Serve a correggere le partite con HT 0-0 mancante ma gol nel 1o tempo."""
+    hh = aa = 0
+    if not g_html:
+        return 0, 0
+    for part in re.split(r'(<span[^>]*away-goal[^>]*>.*?</span>)', g_html, flags=re.DOTALL | re.IGNORECASE):
+        if not part or not part.strip():
+            continue
+        away = bool(re.match(r'<span[^>]*away-goal', part.strip(), re.IGNORECASE))
+        for tok in part.split(','):
+            m = re.search(r'\d+', tok)
+            if m and int(m.group()) <= 45:
+                if away:
+                    aa += 1
+                else:
+                    hh += 1
+    return hh, aa
+
 # ── Parser file HTML ─────────────────────────────────────────────────────────
 
 def parse_html_file(filepath, league_id):
@@ -106,6 +125,20 @@ def parse_html_file(filepath, league_id):
         else:             result = 'X'
 
         fg_team, fg_min = parse_first_goal(g_html, g_text)
+
+        # FIX dato: il 1o gol e' nel 1o tempo (<=16') ma alcune partite (leghe minori/vecchie)
+        # hanno l'HT mancante -> la squadra che ha segnato per prima risulta 0 a fine 1T.
+        # Ricava l'HT reale dai minuti+squadra dei gol; ST = FT - HT.
+        if fg_min is not None and fg_min <= 45 and (
+                (fg_team == 'home' and ht_h == 0) or (fg_team == 'away' and ht_a == 0)):
+            dh, da = derive_ht_from_goals(g_html)
+            if (dh or da) and dh <= ft_h and da <= ft_a and (
+                    (fg_team == 'home' and dh > 0) or (fg_team == 'away' and da > 0)):
+                ht_h, ht_a = dh, da
+                st_h, st_a = ft_h - dh, ft_a - da
+                total_goals = ft_h + ft_a
+                ht_goals = ht_h + ht_a
+                st_goals = st_h + st_a
 
         if fg_team == 'home':
             fg_result = ('win' if ft_h > ft_a else ('loss' if ft_h < ft_a else 'draw'))
