@@ -623,7 +623,8 @@ function loadEG(){
     $("e-league").innerHTML = lgs.map(function(l){ return '<option>'+l+'</option>'; }).join("");
     const defs = ["Italy - Serie A","England - Premier League","Spain - La Liga"];
     for (let i=0; i<defs.length; i++){ if (lgs.indexOf(defs[i])>=0){ $("e-league").value = defs[i]; break; } }
-    ["e-league","e-pg"].forEach(function(id){ $(id).addEventListener("change", function(){ eRefreshHt(); eUpdate(); }); });
+    $("e-league").addEventListener("change", function(){ eRefreshHt(); eUpdate(); if(typeof _streaksOpen!=='undefined'&&_streaksOpen)loadStreaks(); });
+    $("e-pg").addEventListener("change", function(){ eRefreshHt(); eUpdate(); });
     $("e-ht").addEventListener("change", eUpdate);
     eRefreshHt(); eUpdate();
   }).catch(function(e){ $("e-meta").textContent = "Errore caricamento /api/ml-data: " + e; });
