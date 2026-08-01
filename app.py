@@ -482,47 +482,40 @@ def api_league_detail(lid):
         'seasons': seasons,
     })
 
-@app.route('/api/leagues/<int:lid>/streaks')
-def api_league_streaks(lid):
-    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
-    if not info:
-        return jsonify({'error': 'Not found'}), 404
-    rows = query("""
-        SELECT ht_home, ht_away, st_home, st_away, ft_home, ft_away
-        FROM matches WHERE league_id=?
-        ORDER BY sort_date ASC, time_str ASC
-    """, (lid,))
+# ---- Streaks (serie consecutive): logica riusabile per lega e per il radar ----
+_STREAK_MARKETS = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite',
+                   'Over 1.5', 'Over 2.5', 'Over 3.5', 'Over 4.5']
+# 'Over 0.5' solo nel 2T (ST): in FT/HT c'e' sempre il gol early (<=16') -> ~100% degenere.
+_STREAK_MARKETS_ST = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite', 'Over 0.5',
+                      'Over 1.5', 'Over 2.5', 'Over 3.5', 'Over 4.5']
+_STREAK_PERIODS = {'FT': ('ft_home', 'ft_away'),
+                   'HT': ('ht_home', 'ht_away'),
+                   'ST': ('st_home', 'st_away')}
 
-    # NB: 'Over 0.5' solo nel 2T (ST): in FT/HT c'e' sempre il gol early (<=16') -> ~100% degenere.
-    # Nel 2T invece e' informativo (il secondo tempo puo' finire con 0 gol).
-    MARKETS = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite', 'Over 1.5',
-               'Over 2.5', 'Over 3.5', 'Over 4.5']
-    MARKETS_ST = ['1', 'X', '2', 'BTTS', 'Gol Casa', 'Gol Ospite', 'Over 0.5', 'Over 1.5',
-                  'Over 2.5', 'Over 3.5', 'Over 4.5']
 
-    def market_hits(h, a):
-        tot = h + a
-        return {
-            '1': h > a, 'X': h == a, '2': h < a,
-            'BTTS': h > 0 and a > 0,
-            'Gol Casa': h > 0, 'Gol Ospite': a > 0,
-            'Over 0.5': tot > 0, 'Over 1.5': tot > 1, 'Over 2.5': tot > 2,
-            'Over 3.5': tot > 3, 'Over 4.5': tot > 4,
-        }
+def _streak_market_hits(h, a):
+    tot = h + a
+    return {
+        '1': h > a, 'X': h == a, '2': h < a,
+        'BTTS': h > 0 and a > 0,
+        'Gol Casa': h > 0, 'Gol Ospite': a > 0,
+        'Over 0.5': tot > 0, 'Over 1.5': tot > 1, 'Over 2.5': tot > 2,
+        'Over 3.5': tot > 3, 'Over 4.5': tot > 4,
+    }
 
-    periods = {'FT': ('ft_home', 'ft_away'),
-               'HT': ('ht_home', 'ht_away'),
-               'ST': ('st_home', 'st_away')}
 
+def _compute_streaks(rows):
+    """Per periodo (FT/HT/ST) e mercato: base_rate, max_pos/max_neg (record striscia+/ritardo),
+    cur_dir/cur_len (striscia in corso). rows ordinate cronologicamente ASC."""
     out = {}
-    for pkey, (kh, ka) in periods.items():
-        mkts = MARKETS_ST if pkey == 'ST' else MARKETS
+    for pkey, (kh, ka) in _STREAK_PERIODS.items():
+        mkts = _STREAK_MARKETS_ST if pkey == 'ST' else _STREAK_MARKETS
         seqs = {mk: [] for mk in mkts}
         for m in rows:
             h, a = m[kh], m[ka]
             if h is None or a is None:
                 continue
-            hh = market_hits(h, a)
+            hh = _streak_market_hits(h, a)
             for mk in mkts:
                 seqs[mk].append(1 if hh[mk] else 0)
         pdata = []
@@ -555,8 +548,64 @@ def api_league_streaks(lid):
                           'max_pos': maxpos, 'max_neg': maxneg,
                           'cur_dir': cur_dir, 'cur_len': cur_len})
         out[pkey] = pdata
+    return out
+
+
+@app.route('/api/leagues/<int:lid>/streaks')
+def api_league_streaks(lid):
+    info = query("SELECT id, name FROM leagues WHERE id=?", (lid,))
+    if not info:
+        return jsonify({'error': 'Not found'}), 404
+    rows = query("""
+        SELECT ht_home, ht_away, st_home, st_away, ft_home, ft_away
+        FROM matches WHERE league_id=?
+        ORDER BY sort_date ASC, time_str ASC
+    """, (lid,))
     return jsonify({'id': lid, 'name': info[0]['name'],
-                    'matches': len(rows), 'periods': out})
+                    'matches': len(rows), 'periods': _compute_streaks(rows)})
+
+
+_RADAR_CACHE = {'ts': 0, 'data': None}
+
+
+@app.route('/api/streaks-radar')
+def api_streaks_radar():
+    """Radar cross-lega: per ogni lega/mercato/periodo, quanto la striscia in corso
+    (ritardo o positiva) e' vicina al record storico. In cache 10 min (memory-safe:
+    una lega alla volta, si tiene solo il riassunto)."""
+    import time as _t
+    now = _t.time()
+    if _RADAR_CACHE['data'] and (now - _RADAR_CACHE['ts'] < 600):
+        return jsonify(_RADAR_CACHE['data'])
+    entries = []
+    for lg in query("SELECT id, name FROM leagues"):
+        rows = query("""
+            SELECT ht_home, ht_away, st_home, st_away, ft_home, ft_away
+            FROM matches WHERE league_id=?
+            ORDER BY sort_date ASC, time_str ASC
+        """, (lg['id'],))
+        if not rows:
+            continue
+        for pkey, pdata in _compute_streaks(rows).items():
+            for mk in pdata:
+                if mk['total'] < 30:          # serve abbastanza storico per un record affidabile
+                    continue
+                cur_dir = mk['cur_dir']
+                cur_len = mk['cur_len'] or 0
+                record = mk['max_pos'] if cur_dir == 'pos' else mk['max_neg']
+                if not record or cur_len < 1:
+                    continue
+                entries.append({
+                    'league_id': lg['id'], 'league': lg['name'], 'period': pkey,
+                    'market': mk['market'], 'base_rate': mk['base_rate'],
+                    'dir': cur_dir, 'cur': cur_len, 'record': record,
+                    'vicinanza': round(100.0 * cur_len / record), 'total': mk['total'],
+                })
+    entries.sort(key=lambda e: -e['vicinanza'])
+    data = {'entries': entries, 'generated': int(now), 'n': len(entries)}
+    _RADAR_CACHE['ts'] = now
+    _RADAR_CACHE['data'] = data
+    return jsonify(data)
 
 @app.route('/api/live')
 def api_live():

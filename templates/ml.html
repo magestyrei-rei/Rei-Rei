@@ -84,6 +84,7 @@
      <div class="tab" data-view="scan">&#x1F9ED; Scanner</div>
      <div class="tab" data-view="comeback">&#x1F504; Rimonte</div>
      <div class="tab" data-view="andamento">&#x1F4C8; Andamento</div>
+     <div class="tab" data-view="radar">&#x1F6A6; Radar</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -105,6 +106,30 @@
       <button onclick="loadAndamento()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
     </div>
     <div id="and-chart"><div style="color:#64748b;font-size:13px">Scegli campionato e mercato, poi premi Calcola.</div></div>
+  </section>
+
+  <section class="view" id="view-radar">
+    <style>#view-radar select,#view-radar input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-radar input[type=range]{padding:0;vertical-align:middle}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">
+      &#x1F6A6; <b>Come si usa &mdash; ritardi &amp; strisce:</b> per ogni <b>campionato / mercato / periodo</b> confronta la <b>striscia in corso</b> col suo <b>record storico</b>. La <b>vicinanza %</b> = attuale &divide; record: pi&ugrave; &egrave; alta, pi&ugrave; il mercato &egrave; a un estremo.
+      <ul style="margin:6px 0 6px 18px;padding:0">
+        <li><b>&#x1F53B; Ritardi</b> = quante volte di fila il mercato <b>NON</b> esce (sotto-performance). Un ritardo lungo su un mercato ad <b>alto base rate</b> &egrave; il segnale pi&ugrave; forte.</li>
+        <li><b>&#x1F53A; Strisce+</b> = quante volte di fila il mercato <b>esce</b> (sovra-performance).</li>
+      </ul>
+      Semafori: <b style="color:#eab308">&#x1F7E1; 65-84% in avvicinamento</b> &middot; <b style="color:#f59e0b">&#x1F7E0; 85-99% vicino</b> &middot; <b style="color:#ef4444">&#x1F534; &ge;100% al record o oltre</b>. Regola la <b>soglia</b> per pi&ugrave;/meno segnalazioni. Il <b>base rate minimo</b> parte da <b>50%</b> (un ritardo conta solo sui mercati che di solito escono, come il tuo Over 1.5); <b>abbassalo</b> per vedere anche i mercati rari.<br>
+      &#x26A0;&#xFE0F; Non &egrave; una garanzia d&#39;uscita (le partite sono ~indipendenti): &egrave; un <b>segnale di estremo</b> da leggere insieme al base rate e all&#39;Andamento.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Tipo</label><select id="rad-dir" onchange="renderRadar()">
+        <option value="neg" selected>&#x1F53B; Ritardi</option><option value="pos">&#x1F53A; Strisce+</option></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Periodo</label><select id="rad-period" onchange="renderRadar()">
+        <option value="">Tutti</option><option value="FT">FT</option><option value="HT">HT</option><option value="ST">ST</option></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="rad-league" onchange="renderRadar()" style="min-width:160px"><option value="">Tutti</option></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Base rate min %</label><input type="number" id="rad-br" value="50" min="0" max="100" step="5" style="width:68px" oninput="renderRadar()"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Soglia vicinanza: <b id="rad-soglia-val">65%</b></label><input type="range" id="rad-soglia" min="50" max="100" value="65" step="5" oninput="document.getElementById('rad-soglia-val').textContent=this.value+'%';renderRadar()"></div>
+      <button onclick="loadRadar(true)" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">&#x21BB; Aggiorna</button>
+    </div>
+    <div id="rad-table"><div style="color:#64748b;font-size:13px">Caricamento radar&hellip;</div></div>
   </section>
 
   <section class="view" id="view-comeback">
@@ -568,6 +593,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "scan") loadScannerInit();
     if (t.dataset.view === "comeback") loadComebackInit();
     if (t.dataset.view === "andamento") { loadAndamentoInit(); startAndamentoRefresh(); } else { stopAndamentoRefresh(); }
+    if (t.dataset.view === "radar") loadRadarInit();
   });
 });
 
@@ -1608,6 +1634,73 @@ function andPeriodChange(){
 }
 function startAndamentoRefresh(){ stopAndamentoRefresh(); if(document.getElementById('and-league').value) loadAndamento(); _andTimer=setInterval(function(){ if(document.getElementById('and-league').value) loadAndamento(); },90000); }
 function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTimer=null;} }
+
+// === Radar ritardi & strisce (vicinanza al record storico) ===
+var _radarData=null,_radLeaguesLoaded=false;
+async function loadRadarInit(){
+  if(!_radLeaguesLoaded){
+    _radLeaguesLoaded=true;
+    try{
+      var r=await fetch('/api/leagues');var d=await r.json();
+      var arr=Array.isArray(d)?d:(d.leagues||[]);
+      arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      var sel=document.getElementById('rad-league');
+      arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.name;o.textContent=lg.name;sel.appendChild(o);});
+    }catch(e){}
+  }
+  if(!_radarData) loadRadar(false);
+}
+async function loadRadar(force){
+  var el=document.getElementById('rad-table');
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo radar su tutte le leghe (in cache 10 min)&hellip;</div>';
+  try{
+    var r=await fetch('/api/streaks-radar'+(force?('?t='+Date.now()):''),{cache:'no-store'});
+    _radarData=await r.json();
+    renderRadar();
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function radColor(v){ if(v>=100)return '#ef4444'; if(v>=85)return '#f59e0b'; if(v>=65)return '#eab308'; return '#64748b'; }
+function radDot(v){ if(v>=100)return '&#x1F534;'; if(v>=85)return '&#x1F7E0;'; if(v>=65)return '&#x1F7E1;'; return '&#x26AA;'; }
+function renderRadar(){
+  var el=document.getElementById('rad-table'); if(!_radarData)return;
+  var dir=document.getElementById('rad-dir').value;
+  var per=document.getElementById('rad-period').value;
+  var lg=document.getElementById('rad-league').value;
+  var brmin=parseFloat(document.getElementById('rad-br').value)||0;
+  var soglia=parseInt(document.getElementById('rad-soglia').value)||65;
+  var rows=(_radarData.entries||[]).filter(function(e){
+    if(e.dir!==dir)return false;
+    if(per&&e.period!==per)return false;
+    if(lg&&e.league!==lg)return false;
+    if(e.base_rate<brmin)return false;
+    if(e.vicinanza<soglia)return false;
+    return true;
+  });
+  if(!rows.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun mercato oltre la soglia con questi filtri. Abbassa la soglia o togli qualche filtro.</div>';return;}
+  var tipoLab=dir==='neg'?'Ritardo':'Striscia+';
+  var h='<div style="margin-bottom:6px;font-size:12px;color:#94a3b8">'+rows.length+' segnalazioni &middot; ordinate per vicinanza al record</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+    +'<th style="padding:7px 10px;text-align:left">Campionato</th>'
+    +'<th style="padding:7px 10px;text-align:left">Mercato</th>'
+    +'<th style="padding:7px 10px;text-align:center">Per.</th>'
+    +'<th style="padding:7px 10px;text-align:center">Base rate</th>'
+    +'<th style="padding:7px 10px;text-align:center">'+tipoLab+'</th>'
+    +'<th style="padding:7px 10px;text-align:center">Record</th>'
+    +'<th style="padding:7px 10px;text-align:center">Vicinanza</th></tr></thead><tbody>';
+  rows.forEach(function(e,i){
+    var col=radColor(e.vicinanza),bg=i%2?'background:#0f172a;':'';
+    h+='<tr style="border-top:1px solid #1e293b;'+bg+'">'
+      +'<td style="padding:6px 10px;color:#e2e8f0">'+e.league+'</td>'
+      +'<td style="padding:6px 10px;font-weight:600;color:#e2e8f0">'+e.market+'</td>'
+      +'<td style="padding:6px 10px;text-align:center;color:#94a3b8">'+e.period+'</td>'
+      +'<td style="padding:6px 10px;text-align:center;color:#93c5fd">'+e.base_rate+'%</td>'
+      +'<td style="padding:6px 10px;text-align:center;font-weight:700">'+e.cur+'</td>'
+      +'<td style="padding:6px 10px;text-align:center;color:#94a3b8">'+e.record+'</td>'
+      +'<td style="padding:6px 10px;text-align:center;font-weight:700;color:'+col+'">'+radDot(e.vicinanza)+' '+e.vicinanza+'%</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
 
 </script>
 </body>
