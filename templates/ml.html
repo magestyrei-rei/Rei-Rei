@@ -126,6 +126,7 @@
         <option value="">Tutti</option><option value="FT">FT</option><option value="HT">HT</option><option value="ST">ST</option></select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="rad-league" onchange="renderRadar()" style="min-width:160px"><option value="">Tutti</option></select></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Base rate min %</label><input type="number" id="rad-br" value="50" min="0" max="100" step="5" style="width:68px" oninput="renderRadar()"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Min attuale</label><input type="number" id="rad-min" value="3" min="1" max="50" step="1" style="width:60px" oninput="renderRadar()"></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Soglia vicinanza: <b id="rad-soglia-val">65%</b></label><input type="range" id="rad-soglia" min="50" max="100" value="65" step="5" oninput="document.getElementById('rad-soglia-val').textContent=this.value+'%';renderRadar()"></div>
       <button onclick="loadRadar(true)" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">&#x21BB; Aggiorna</button>
     </div>
@@ -1668,11 +1669,13 @@ function renderRadar(){
   var lg=document.getElementById('rad-league').value;
   var brmin=parseFloat(document.getElementById('rad-br').value)||0;
   var soglia=parseInt(document.getElementById('rad-soglia').value)||65;
+  var minc=parseInt(document.getElementById('rad-min').value)||1;
   var rows=(_radarData.entries||[]).filter(function(e){
     if(e.dir!==dir)return false;
     if(per&&e.period!==per)return false;
     if(lg&&e.league!==lg)return false;
     if(e.base_rate<brmin)return false;
+    if(e.cur<minc)return false;
     if(e.vicinanza<soglia)return false;
     return true;
   });
