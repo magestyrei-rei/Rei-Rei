@@ -607,6 +607,146 @@ def api_streaks_radar():
     _RADAR_CACHE['data'] = data
     return jsonify(data)
 
+
+# ---- Market trend & Monitor Trend ----
+# Mappa chiave frontend -> funzione hit(h, a) -> bool
+_MKT_HIT_MAP = {
+    '1':          lambda h, a: h > a,
+    'X':          lambda h, a: h == a,
+    '2':          lambda h, a: h < a,
+    'btts_si':    lambda h, a: h > 0 and a > 0,
+    'btts_no':    lambda h, a: not (h > 0 and a > 0),
+    'gol_casa':   lambda h, a: h > 0,
+    'gol_ospite': lambda h, a: a > 0,
+    'over_0_5':   lambda h, a: h + a > 0,
+    'over_1_5':   lambda h, a: h + a > 1,
+    'over_2_5':   lambda h, a: h + a > 2,
+    'over_3_5':   lambda h, a: h + a > 3,
+    'over_4_5':   lambda h, a: h + a > 4,
+    'under_1_5':  lambda h, a: h + a < 2,
+    'under_2_5':  lambda h, a: h + a < 3,
+    'under_3_5':  lambda h, a: h + a < 4,
+    'under_4_5':  lambda h, a: h + a < 5,
+}
+
+
+@app.route('/api/market-trend')
+def api_market_trend():
+    """Sequenza wins (0/1) + media per campionato/mercato/periodo. Usato da Andamento (candele)."""
+    try:
+        lid = int(request.args.get('league', 0))
+        market = request.args.get('market', 'over_2_5')
+        period = request.args.get('period', 'FT')
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Parametri non validi'}), 400
+
+    if period not in _STREAK_PERIODS:
+        return jsonify({'error': f'Periodo "{period}" non valido'}), 400
+    hit_fn = _MKT_HIT_MAP.get(market)
+    if not hit_fn:
+        return jsonify({'error': f'Mercato "{market}" non supportato'}), 400
+    if market == 'over_0_5' and period != 'ST':
+        return jsonify({'error': 'Over 0.5 disponibile solo in ST'}), 400
+
+    col_h, col_a = _STREAK_PERIODS[period]
+    rows = query(f"""
+        SELECT {col_h} AS h, {col_a} AS a
+        FROM matches WHERE league_id=? AND {col_h} IS NOT NULL AND {col_a} IS NOT NULL
+        ORDER BY sort_date ASC, time_str ASC
+    """, (lid,))
+
+    if not rows:
+        return jsonify({'wins': [], 'avg': 0})
+
+    wins = [1 if hit_fn(r['h'], r['a']) else 0 for r in rows]
+    avg = sum(wins) / len(wins) if wins else 0
+    return jsonify({'wins': wins, 'avg': round(avg, 4)})
+
+
+_TREND_MONITOR_CACHE = {}
+
+
+@app.route('/api/trend-monitor')
+def api_trend_monitor():
+    """Cross-lega: R10/R20/R30 + streak + trend per un mercato/periodo. Cache 5 min."""
+    market = request.args.get('market', 'over_1_5')
+    period = request.args.get('period', 'FT')
+    cache_key = f'{market}_{period}'
+
+    import time as _t
+    now = _t.time()
+    cached = _TREND_MONITOR_CACHE.get(cache_key)
+    if cached and now - cached['ts'] < 300:
+        return jsonify(cached['data'])
+
+    if period not in _STREAK_PERIODS:
+        return jsonify({'error': 'Periodo non valido'}), 400
+    hit_fn = _MKT_HIT_MAP.get(market)
+    if not hit_fn:
+        return jsonify({'error': 'Mercato non supportato'}), 400
+    if market == 'over_0_5' and period != 'ST':
+        return jsonify({'error': 'Over 0.5 disponibile solo in ST'}), 400
+
+    col_h, col_a = _STREAK_PERIODS[period]
+    leagues = query("SELECT id, name FROM leagues ORDER BY name")
+    result = []
+
+    for lg in leagues:
+        rows = query(f"""
+            SELECT {col_h} AS h, {col_a} AS a
+            FROM matches WHERE league_id=? AND {col_h} IS NOT NULL AND {col_a} IS NOT NULL
+            ORDER BY sort_date ASC, time_str ASC
+        """, (lg['id'],))
+
+        n = len(rows)
+        if n < 12:
+            continue
+
+        wins = [1 if hit_fn(r['h'], r['a']) else 0 for r in rows]
+        avg = round(sum(wins) / n * 100, 1)
+        r10 = round(sum(wins[-10:]) / 10 * 100, 1)
+        r20 = round(sum(wins[-20:]) / 20 * 100, 1) if n >= 20 else None
+        r30 = round(sum(wins[-30:]) / 30 * 100, 1) if n >= 30 else None
+
+        last_val = wins[-1]
+        streak = 0
+        for v in reversed(wins):
+            if v == last_val:
+                streak += 1
+            else:
+                break
+        streak_dir = 'pos' if last_val == 1 else 'neg'
+
+        trend = 'flat'
+        if r20 is not None and r30 is not None:
+            if r10 > r20 and r20 > r30:
+                trend = 'rialzista'
+            elif r10 < r20 and r20 < r30:
+                trend = 'ribassista'
+            elif r10 > r30:
+                trend = 'up'
+            elif r10 < r30:
+                trend = 'down'
+
+        result.append({
+            'id': lg['id'], 'name': lg['name'], 'n': n,
+            'avg': avg, 'r10': r10, 'r20': r20, 'r30': r30,
+            'streak': streak, 'streak_dir': streak_dir, 'trend': trend,
+        })
+
+    result.sort(key=lambda x: (
+        0 if x['trend'] == 'rialzista' and x['streak_dir'] == 'pos' else
+        1 if x['trend'] == 'up' and x['streak_dir'] == 'pos' else
+        2 if x['streak_dir'] == 'pos' else 3,
+        -x['streak'],
+        -(x['r10'] or 0)
+    ))
+
+    data = {'market': market, 'period': period, 'leagues': result, 'n': len(result)}
+    _TREND_MONITOR_CACHE[cache_key] = {'ts': now, 'data': data}
+    return jsonify(data)
+
+
 @app.route('/api/live')
 def api_live():
     with _lock:
