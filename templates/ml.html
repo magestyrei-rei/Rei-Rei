@@ -85,7 +85,6 @@
      <div class="tab" data-view="scan">&#x1F9ED; Scanner</div>
      <div class="tab" data-view="comeback">&#x1F504; Rimonte</div>
      <div class="tab" data-view="andamento">&#x1F4C8; Andamento</div>
-     <div class="tab" data-view="monitor">&#x1F4CA; Monitor Trend</div>
      <div class="tab" data-view="radar">&#x1F6A6; Radar</div>
   </div>
 
@@ -108,62 +107,6 @@
       <button onclick="loadAndamento()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
     </div>
     <div id="and-chart"><div style="color:#64748b;font-size:13px">Scegli campionato e mercato, poi premi Calcola.</div></div>
-  </section>
-
-  <section class="view" id="view-monitor">
-    <style>
-      #view-monitor select,#view-monitor input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}
-      #view-monitor optgroup{background:#0b1220;color:#7dd3fc;font-weight:600}
-      #view-monitor option{background:#0f172a;color:#e2e8f0;font-weight:400}
-    </style>
-    <!-- GUIDA -->
-    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#cbd5e1;line-height:1.75">
-      <b>&#x1F4CA; Monitor Trend &mdash; come funziona e come usarlo</b><br><br>
-      Questa sezione mostra, per <b>tutti i campionati in parallelo</b>, l&rsquo;andamento recente di un mercato sulle <b>ultime 10, 20 e 30 partite</b> (R10 / R20 / R30) e la <b>striscia attuale</b> (quante partite consecutive il mercato &egrave; uscito o non &egrave; uscito).<br><br>
-      <b>Come leggere il trend:</b>
-      <ul style="margin:6px 0 8px 18px;padding:0;line-height:1.8">
-        <li><b style="color:#22c55e">&#x2191;&#x2191;&#x2191; Rialzista</b>: R10 &gt; R20 &gt; R30 &mdash; il tasso <b>cresce</b> nelle ultime partite. Il segnale pi&ugrave; forte, specie con striscia positiva lunga.</li>
-        <li><b style="color:#38bdf8">&#x2191; In salita</b>: R10 &gt; R30 ma progressione non piena &mdash; direzione positiva, meno netta.</li>
-        <li><b style="color:#94a3b8">&#x2192; Stabile</b>: il tasso si mantiene vicino alla media storica.</li>
-        <li><b style="color:#fb923c">&#x2193; In calo</b>: R10 &lt; R30, segnale di indebolimento recente.</li>
-        <li><b style="color:#f87171">&#x2193;&#x2193; Ribassista</b>: R10 &lt; R20 &lt; R30 &mdash; il mercato sta uscendo meno del solito.</li>
-      </ul>
-      <b>Come usarlo:</b> cerca campionati con <b>trend Rialzista + striscia positiva lunga</b> &mdash; sono quelli in un momento di massima efficienza per quel mercato. Il segnale &egrave; pi&ugrave; solido quando anche l&rsquo;<b>Avg storico</b> &egrave; alto: stai assistendo al picco di un mercato che di solito esce spesso.<br>
-      La <b>striscia</b> compare come <span style="color:#22c55e;font-weight:700">+N</span> (positiva, mercato uscito N volte di fila) o <span style="color:#f87171;font-weight:700">-N</span> (negativa). Pi&ugrave; &egrave; lunga, pi&ugrave; il segnale &egrave; estremo &mdash; confrontalo col <b>Radar</b> per capire quanto &egrave; vicina al record.<br>
-      <span style="color:#f59e0b">&#x26A0;</span> Ogni partita &egrave; statisticamente <b>indipendente</b> &mdash; il trend non garantisce la prossima. Usalo per <b>scegliere il campionato</b> su cui concentrarti, non come garanzia d&rsquo;uscita. I dati si aggiornano in cache ogni 5 minuti.
-    </div>
-    <!-- CONTROLLI -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
-      <div>
-        <label style="font-size:11px;color:#94a3b8;display:block">Periodo</label>
-        <select id="mon-period" onchange="monPeriodChange()">
-          <option value="FT" selected>FT &middot; finale</option>
-          <option value="HT">HT &middot; 1&deg; tempo</option>
-          <option value="ST">ST &middot; 2&deg; tempo</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:11px;color:#94a3b8;display:block">Mercato</label>
-        <select id="mon-market">
-          <optgroup label="Esiti"><option value="1">1 (Casa)</option><option value="X">X (Pareggio)</option><option value="2">2 (Ospite)</option></optgroup>
-          <optgroup label="Gol / BTTS"><option value="btts_si">BTTS S&igrave;</option><option value="btts_no">BTTS No</option><option value="gol_casa">Gol Casa</option><option value="gol_ospite">Gol Ospite</option></optgroup>
-          <optgroup label="Over"><option value="over_0_5" id="mon-opt-o05" disabled>Over 0.5 (solo ST)</option><option value="over_1_5" selected>Over 1.5</option><option value="over_2_5">Over 2.5</option><option value="over_3_5">Over 3.5</option><option value="over_4_5">Over 4.5</option></optgroup>
-          <optgroup label="Under"><option value="under_1_5">Under 1.5</option><option value="under_2_5">Under 2.5</option><option value="under_3_5">Under 3.5</option><option value="under_4_5">Under 4.5</option></optgroup>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:11px;color:#94a3b8;display:block">Mostra</label>
-        <select id="mon-filter" onchange="if(_monData)renderMonitor()">
-          <option value="">Tutti i campionati</option>
-          <option value="rialzista">Solo &#x2191;&#x2191;&#x2191; Rialzisti</option>
-          <option value="pos_streak">Solo striscia positiva</option>
-          <option value="ribassista">Solo &#x2193;&#x2193; Ribassisti</option>
-          <option value="neg_streak">Solo striscia negativa</option>
-        </select>
-      </div>
-      <button onclick="loadMonitor()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
-    </div>
-    <div id="mon-result"><div style="color:#64748b;font-size:13px">Scegli mercato e periodo, poi premi Calcola.</div></div>
   </section>
 
   <section class="view" id="view-radar">
@@ -665,7 +608,6 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "scan") loadScannerInit();
     if (t.dataset.view === "comeback") loadComebackInit();
     if (t.dataset.view === "andamento") { loadAndamentoInit(); startAndamentoRefresh(); } else { stopAndamentoRefresh(); }
-    if (t.dataset.view === "monitor") loadMonitorInit();
     if (t.dataset.view === "radar") loadRadarInit();
     if (t.dataset.view === "casi") loadCasiInit();
   });
@@ -1758,77 +1700,6 @@ function andPeriodChange(){
 }
 function startAndamentoRefresh(){ stopAndamentoRefresh(); if(document.getElementById('and-league').value) loadAndamento(); _andTimer=setInterval(function(){ if(document.getElementById('and-league').value) loadAndamento(); },90000); }
 function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTimer=null;} }
-
-// === Monitor Trend cross-lega ===
-var _monData=null,_monLoaded=false;
-function loadMonitorInit(){ if(!_monLoaded){ _monLoaded=true; } }
-function monPeriodChange(){
-  var per=document.getElementById('mon-period').value;
-  var o05=document.getElementById('mon-opt-o05'),sel=document.getElementById('mon-market');
-  if(o05){ if(per==='ST'){o05.disabled=false;} else {o05.disabled=true; if(sel.value==='over_0_5') sel.value='over_1_5';} }
-}
-async function loadMonitor(){
-  var el=document.getElementById('mon-result');
-  var market=document.getElementById('mon-market').value;
-  var period=document.getElementById('mon-period').value;
-  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo trend su tutti i campionati&hellip; (pu&ograve; richiedere qualche secondo)</div>';
-  try{
-    var r=await fetch('/api/trend-monitor?market='+market+'&period='+period,{cache:'no-store'});
-    var d=await r.json();
-    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
-    _monData=d;
-    renderMonitor();
-  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
-}
-function renderMonitor(){
-  if(!_monData)return;
-  var el=document.getElementById('mon-result');
-  var filter=document.getElementById('mon-filter').value;
-  var leagues=(_monData.leagues||[]).slice();
-  if(filter==='rialzista') leagues=leagues.filter(function(l){return l.trend==='rialzista'&&l.streak_dir==='pos';});
-  if(filter==='pos_streak') leagues=leagues.filter(function(l){return l.streak_dir==='pos';});
-  if(filter==='ribassista') leagues=leagues.filter(function(l){return l.trend==='ribassista';});
-  if(filter==='neg_streak') leagues=leagues.filter(function(l){return l.streak_dir==='neg';});
-  if(!leagues.length){el.innerHTML='<div style="color:#64748b;font-size:13px;padding:10px">Nessun campionato corrisponde al filtro selezionato.</div>';return;}
-  var mkl={'1':'1 Casa','X':'X Pari','2':'2 Ospite','btts_si':'BTTS Sì','btts_no':'BTTS No','gol_casa':'Gol Casa','gol_ospite':'Gol Ospite','over_0_5':'Over 0.5','over_1_5':'Over 1.5','over_2_5':'Over 2.5','over_3_5':'Over 3.5','over_4_5':'Over 4.5','under_1_5':'Under 1.5','under_2_5':'Under 2.5','under_3_5':'Under 3.5','under_4_5':'Under 4.5'};
-  var perName={'FT':'FT finale','HT':'HT 1° t.','ST':'ST 2° t.'};
-  function trendHtml(trend,dir){
-    var s={rialzista:['rgba(34,197,94,.13)','#22c55e','↑↑↑ Rialzista'],up:['rgba(56,189,248,.12)','#38bdf8','↑ In salita'],flat:['rgba(100,116,139,.15)','#64748b','→ Stabile'],down:['rgba(251,146,60,.12)','#fb923c','↓ In calo'],ribassista:['rgba(248,113,113,.13)','#f87171','↓↓ Ribassista']};
-    var v=s[trend]||s['flat'];
-    return '<span style="background:'+v[0]+';color:'+v[1]+';font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap">'+v[2]+'</span>';
-  }
-  function streakHtml(sk,dir){
-    if(dir==='neg') return '<span style="color:#f87171;font-weight:700;font-variant-numeric:tabular-nums">-'+sk+'</span>';
-    var c=sk>=15?'#f59e0b':sk>=7?'#22c55e':'#38bdf8';
-    return '<span style="color:'+c+';font-weight:700;font-variant-numeric:tabular-nums">+'+sk+'</span>';
-  }
-  function rateCell(val,avg){
-    if(val===null||val===undefined) return '<span style="color:#334155;font-size:11px">—</span>';
-    var c=val>=80?'#22c55e':val>=60?'#38bdf8':'#64748b';
-    var w=Math.min(100,val);
-    return '<div style="display:flex;align-items:center;gap:5px"><div style="width:38px;height:5px;background:#1e293b;border-radius:3px;overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+c+';border-radius:3px"></div></div><span style="font-size:12px;color:'+c+';font-weight:600;font-variant-numeric:tabular-nums">'+val+'%</span></div>';
-  }
-  var h='<div style="margin-bottom:10px;font-size:12px;color:#64748b">'+leagues.length+' campionati &middot; Mercato: <b style="color:#7dd3fc">'+(mkl[_monData.market]||_monData.market)+'</b> &middot; Periodo: <b style="color:#7dd3fc">'+(perName[_monData.period]||_monData.period)+'</b> &middot; ordinati per segnale pi&ugrave; forte</div>';
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#1d4ed8;color:#fff">';
-  ['#','Campionato','Avg','R30','R20','R10','Streak','Trend'].forEach(function(t){h+='<th style="padding:8px 10px;text-align:left;font-weight:600;white-space:nowrap">'+t+'</th>';});
-  h+='</tr></thead><tbody>';
-  leagues.forEach(function(l,i){
-    var bg=i%2===0?'':'background:#0f1a2e';
-    h+='<tr style="'+bg+'">';
-    h+='<td style="padding:6px 10px;color:#64748b;font-size:11px">'+(i+1)+'</td>';
-    h+='<td style="padding:6px 10px;font-weight:600;color:#e2e8f0">'+l.name+'</td>';
-    h+='<td style="padding:6px 10px"><span style="color:#64748b;font-size:11.5px;font-variant-numeric:tabular-nums">'+l.avg+'%</span></td>';
-    h+='<td style="padding:6px 10px">'+rateCell(l.r30,l.avg)+'</td>';
-    h+='<td style="padding:6px 10px">'+rateCell(l.r20,l.avg)+'</td>';
-    h+='<td style="padding:6px 10px">'+rateCell(l.r10,l.avg)+'</td>';
-    h+='<td style="padding:6px 10px">'+streakHtml(l.streak,l.streak_dir)+'</td>';
-    h+='<td style="padding:6px 10px">'+trendHtml(l.trend,l.streak_dir)+'</td>';
-    h+='</tr>';
-  });
-  h+='</tbody></table></div>';
-  el.innerHTML=h;
-}
-
 
 // === Radar ritardi & strisce (vicinanza al record storico) ===
 var _radarData=null,_radLeaguesLoaded=false;
