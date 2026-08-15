@@ -1657,7 +1657,7 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
-    @app.route('/api/live-matches')
+    @app.route('/api/live-matches')  # nudge redeploy 2026-07-29
     def api_live_matches():
         """Per (campionato, minuto, punteggio attuale): restituisce l'ELENCO delle
         partite storiche di quella lega che erano in quello stato a quel minuto (come
