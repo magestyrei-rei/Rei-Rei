@@ -1657,6 +1657,88 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
+    @app.route('/api/live-matches')
+    def api_live_matches():
+        """Per (campionato, minuto, punteggio attuale): restituisce l'ELENCO delle
+        partite storiche di quella lega che erano in quello stato a quel minuto (come
+        sono finite) + le % di uscita dei mercati da li in poi. Una sola scansione."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            minute = int(request.args.get('minute') or 65)
+            sh = int(request.args.get('sh') or 0)
+            sa = int(request.args.get('sa') or 0)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            total = sh + sa
+            markets = [('over_1_5', 'Over 1.5', 2), ('over_2_5', 'Over 2.5', 3),
+                       ('over_3_5', 'Over 3.5', 4), ('over_4_5', 'Over 4.5', 5),
+                       ('under_1_5', 'Under 1.5', 2), ('under_2_5', 'Under 2.5', 3),
+                       ('under_3_5', 'Under 3.5', 4), ('under_4_5', 'Under 4.5', 5),
+                       ('btts_si', 'BTTS Si', None), ('btts_no', 'BTTS No', None),
+                       ('1', '1 (Casa)', None), ('X', 'X (Pareggio)', None), ('2', '2 (Ospite)', None)]
+            cnt = {mk: [0, 0] for mk, _, _ in markets}
+            matched = []
+            n_matched = 0
+            con = _sqlite3.connect(_LOCAL_DB)
+            con.row_factory = _sqlite3.Row
+            rows = con.execute(
+                "SELECT date_str, home_team, away_team, ft_home, ft_away, goals_html, goals_text "
+                "FROM matches WHERE league_id=? ORDER BY sort_date DESC, time_str DESC", (lid,)).fetchall()
+            con.close()
+            for r in rows:
+                fh, fa = r['ft_home'], r['ft_away']
+                if fh is None or fa is None:
+                    continue
+                tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                if any(aw is None for (mn, aw) in tl if mn <= minute):
+                    continue
+                hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+                aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+                if hM != sh or aM != sa:
+                    continue
+                n_matched += 1
+                tot_ft = fh + fa
+                btts = (fh > 0 and fa > 0)
+                for mk, label, thr in markets:
+                    if thr is not None:
+                        if total >= thr:
+                            continue
+                        cnt[mk][0] += 1
+                        if mk.startswith('over_'):
+                            if tot_ft >= thr:
+                                cnt[mk][1] += 1
+                        else:
+                            if tot_ft < thr:
+                                cnt[mk][1] += 1
+                    elif mk in ('btts_si', 'btts_no'):
+                        if sh > 0 and sa > 0:
+                            continue
+                        cnt[mk][0] += 1
+                        if (mk == 'btts_si' and btts) or (mk == 'btts_no' and not btts):
+                            cnt[mk][1] += 1
+                    else:
+                        cnt[mk][0] += 1
+                        if {'1': fh > fa, 'X': fh == fa, '2': fa > fh}[mk]:
+                            cnt[mk][1] += 1
+                if len(matched) < 30:
+                    fgm = tl[0][0] if tl else None
+                    fgt = (('away' if tl[0][1] else 'home') if (tl and tl[0][1] is not None) else None)
+                    matched.append({'date': r['date_str'], 'home': r['home_team'], 'away': r['away_team'],
+                                    'final': '%d-%d' % (fh, fa), 'fg_min': fgm, 'fg_team': fgt})
+            out_m = []
+            for mk, label, thr in markets:
+                n, w = cnt[mk]
+                if not n:
+                    continue
+                br = round(100.0 * w / n, 1)
+                out_m.append({'market': mk, 'label': label, 'base_rate': br, 'n': n,
+                              'fair_odds': (round(100.0 / br, 2) if br > 0 else None)})
+            out_m.sort(key=lambda x: -x['base_rate'])
+            return jsonify({'league_id': lid, 'minute': minute, 'state': '%d-%d' % (sh, sa),
+                            'n': n_matched, 'matches': matched, 'markets': out_m})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
     @app.route('/api/scanner')
     def api_scanner():
         """Scanner nicchie: per un minuto + mercato, scorre TUTTI i campionati e

@@ -401,6 +401,17 @@
       <h3>Probabilita FT (condizionate a early-goal + 1T)</h3>
       <div class="cards" id="e-cards"></div>
     </div>
+    <div style="margin-top:16px;background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:8px;padding:12px 14px">
+      <h3 style="margin:0 0 4px;color:#f1f5f9;font-size:15px">&#x1F3AF; Minuto + risultato live</h3>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;line-height:1.6">Metti <b>minuto</b> e <b>punteggio attuale</b> della partita in corso: vedi le ultime partite (fino a 30) di <b>questo campionato</b> (selezionato sopra) che erano nella stessa situazione, come sono finite, e le <b>% di uscita dei mercati da l&igrave; in poi</b>.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <div><label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:2px">Minuto</label><input type="number" id="egl-minute" value="65" min="0" max="120" style="width:72px;padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px"></div>
+        <div><label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:2px">Gol casa</label><input type="number" id="egl-sh" value="1" min="0" max="20" style="width:62px;padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px"></div>
+        <div><label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:2px">Gol ospite</label><input type="number" id="egl-sa" value="1" min="0" max="20" style="width:62px;padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px"></div>
+        <button onclick="loadEgLive()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
+      </div>
+      <div id="egl-out"><div style="color:#64748b;font-size:13px">Scegli il campionato sopra, poi minuto + punteggio e premi Calcola.</div></div>
+    </div>
     <div style="margin-top:14px">
       <button onclick="toggleRecentMatches()" id="eg-recent-btn" style="padding:7px 16px;background:#1e3a5f;color:#93c5fd;border:1px solid #1d4ed8;border-radius:6px;font-size:13px;cursor:pointer">&#x26A1; Ultime 30 early goal (â¤16')</button>
       <div id="eg-recent-table" style="display:none;margin-top:10px"></div>
@@ -1081,6 +1092,48 @@ function toggleRecentMatches(){
   _egRecentOpen=!_egRecentOpen;
   if(_egRecentOpen){el.style.display='block';loadRecentMatches();btn.innerHTML='&#x25B2; Nascondi early goal';}
   else{el.style.display='none';btn.innerHTML='&#x1F4CB; Ultime 30 partite del campionato';}
+}
+async function loadEgLive(){
+  var out=document.getElementById('egl-out');
+  var full=document.getElementById('e-league').value;
+  var mn=document.getElementById('egl-minute').value||'65';
+  var sh=document.getElementById('egl-sh').value||'0';
+  var sa=document.getElementById('egl-sa').value||'0';
+  if(!full){out.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato sopra.</div>';return;}
+  out.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  try{
+    var lr=await fetch('/api/leagues');var ll=await lr.json();
+    var arr=Array.isArray(ll)?ll:(ll.leagues||[]);
+    var lg=arr.find(function(x){return x.name===full;});
+    if(!lg){out.innerHTML='<div style="color:#64748b;padding:10px">Nessuno storico per questo campionato.</div>';return;}
+    var r=await fetch('/api/live-matches?league='+lg.id+'&minute='+mn+'&sh='+sh+'&sa='+sa,{cache:'no-store'});
+    var d=await r.json();
+    if(d.error){out.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    if(!d.n){out.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita storica di questo campionato era '+sh+'-'+sa+' al '+mn+'&#39; (con 1&deg; gol &le;16&#39;).</div>';return;}
+    var h='<div style="margin-bottom:8px;font-size:13px;color:#cbd5e1">Situazione <b>'+sh+'-'+sa+'</b> al <b>'+mn+'&#39;</b> &middot; <b>'+d.n+'</b> partite storiche in '+full+' in questa situazione</div>';
+    var mk=d.markets||[];
+    if(mk.length){
+      h+='<div style="font-size:12px;color:#94a3b8;margin:6px 0 3px">Probabilit&agrave; da qui a fine partita (quota equa = 1 &divide; %):</div>';
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff"><th style="padding:6px 10px;text-align:left">Mercato</th><th style="padding:6px 10px;text-align:center">%</th><th style="padding:6px 10px;text-align:center">Quota equa</th><th style="padding:6px 10px;text-align:center">n</th></tr></thead><tbody>';
+      mk.forEach(function(m,i){
+        var bg=i%2?'background:#0f172a;':'',weak=m.n<30;
+        h+='<tr style="border-top:1px solid #1e293b;'+bg+(weak?'opacity:.6;':'')+'"><td style="padding:5px 10px;font-weight:600;color:#e2e8f0">'+m.label+(weak?' <span style="color:#f59e0b">&#x26A0;</span>':'')+'</td><td style="padding:5px 10px;text-align:center;font-weight:700;color:#93c5fd">'+m.base_rate+'%</td><td style="padding:5px 10px;text-align:center;font-weight:700">'+(m.fair_odds||'-')+'</td><td style="padding:5px 10px;text-align:center;color:#94a3b8">'+m.n+'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+    }
+    var ms=d.matches||[];
+    if(ms.length){
+      var fg=function(v,team){if(v==null)return '-';var c=team==='away'?'#f87171':'#22c55e';return '<span style="color:'+c+'">'+v+'&#39;</span>';};
+      h+='<div style="font-size:12px;color:#94a3b8;margin:12px 0 3px">Ultime '+ms.length+' partite in questa situazione (come sono finite):</div>';
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#1e3a5f;color:#cbd5e1"><th style="padding:5px 10px;text-align:center">#</th><th style="padding:5px 10px;text-align:left">Data</th><th style="padding:5px 10px;text-align:left">Partita</th><th style="padding:5px 10px;text-align:center">al '+mn+'&#39;</th><th style="padding:5px 10px;text-align:center">Finale</th><th style="padding:5px 10px;text-align:center">1&deg; gol</th></tr></thead><tbody>';
+      ms.forEach(function(m,i){
+        var bg=i%2?'background:#0f172a;':'';
+        h+='<tr style="border-top:1px solid #1e293b;'+bg+'"><td style="padding:4px 10px;text-align:center;color:#64748b">'+(i+1)+'</td><td style="padding:4px 10px;color:#94a3b8;white-space:nowrap">'+(m.date||'-')+'</td><td style="padding:4px 10px">'+m.home+' <span style="color:#475569">vs</span> '+m.away+'</td><td style="padding:4px 10px;text-align:center;color:#94a3b8">'+sh+'-'+sa+'</td><td style="padding:4px 10px;text-align:center;font-weight:700;color:#f0883e">'+m.final+'</td><td style="padding:4px 10px;text-align:center">'+fg(m.fg_min,m.fg_team)+'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+    }
+    out.innerHTML=h;
+  }catch(e){out.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
 async function loadRecentMatches(){
   var full=document.getElementById('e-league').value;
