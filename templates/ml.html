@@ -86,6 +86,7 @@
      <div class="tab" data-view="comeback">&#x1F504; Rimonte</div>
      <div class="tab" data-view="andamento">&#x1F4C8; Andamento</div>
      <div class="tab" data-view="radar">&#x1F6A6; Radar</div>
+     <div class="tab" data-view="money">&#x1F4B0; Money</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -132,6 +133,25 @@
       <button onclick="loadRadar(true)" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">&#x21BB; Aggiorna</button>
     </div>
     <div id="rad-table"><div style="color:#64748b;font-size:13px">Caricamento radar&hellip;</div></div>
+  </section>
+
+  <section class="view" id="view-money">
+    <style>#view-money select,#view-money input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-money label{font-size:11px;color:#94a3b8;display:block;margin-bottom:2px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x1F4B0; <b>Come si usa:</b> inserisci il <b>capitale</b> e scegli la <b>strategia</b>. Con Kelly copia la <b>probabilit&agrave;</b> (il base rate del sistema) e la <b>quota</b> del bookie &rarr; calcolo automatico dello stake. Il <b>&frac14; Kelly</b> (consigliato) massimizza la crescita tenendo bassa la varianza e punta di pi&ugrave; solo quando l&#39;edge &egrave; alto.<br>&#x2705; Regola d&#39;oro: <b>mai puntare senza edge positivo</b>; sotto il +2% &egrave; spesso rumore.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px;max-width:660px">
+      <div><label>Capitale (&euro;)</label><input type="number" id="mm-cap" value="1000" min="0" step="10" oninput="calcMoney()"></div>
+      <div><label>Strategia</label><select id="mm-strat" onchange="calcMoney()">
+        <option value="k025" selected>&frac14; Kelly &mdash; bilanciato (consigliato)</option>
+        <option value="k050">&frac12; Kelly &mdash; aggressivo</option>
+        <option value="k100">Kelly pieno &mdash; molto aggressivo</option>
+        <option value="flat">Flat (% fisso)</option>
+      </select></div>
+      <div id="mm-flat-wrap" style="display:none"><label>Flat % del capitale</label><input type="number" id="mm-flat" value="2" min="0.1" max="100" step="0.5" oninput="calcMoney()"></div>
+      <div id="mm-prob-wrap"><label>Probabilit&agrave; stimata %</label><input type="number" id="mm-prob" value="65" min="1" max="99" step="1" oninput="calcMoney()"></div>
+      <div id="mm-odds-wrap"><label>Quota bookie</label><input type="number" id="mm-odds" value="1.60" min="1.01" step="0.01" oninput="calcMoney()"></div>
+      <div><label>Tetto max % capitale</label><input type="number" id="mm-cap-max" value="10" min="1" max="100" step="1" oninput="calcMoney()"></div>
+    </div>
+    <div id="mm-out"></div>
   </section>
 
   <section class="view" id="view-comeback">
@@ -610,6 +630,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "andamento") { loadAndamentoInit(); startAndamentoRefresh(); } else { stopAndamentoRefresh(); }
     if (t.dataset.view === "radar") loadRadarInit();
     if (t.dataset.view === "casi") loadCasiInit();
+    if (t.dataset.view === "money") calcMoney();
   });
 });
 
@@ -1088,6 +1109,50 @@ async function loadCasi(){
     }
     out.innerHTML=h;
   }catch(e){out.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function calcMoney(){
+  var cap=parseFloat(document.getElementById('mm-cap').value)||0;
+  var strat=document.getElementById('mm-strat').value;
+  var isFlat=(strat==='flat');
+  document.getElementById('mm-flat-wrap').style.display=isFlat?'':'none';
+  document.getElementById('mm-prob-wrap').style.display=isFlat?'none':'';
+  document.getElementById('mm-odds-wrap').style.display=isFlat?'none':'';
+  var out=document.getElementById('mm-out');
+  if(!cap||cap<=0){out.innerHTML='<div style="color:#64748b;font-size:13px">Inserisci il capitale.</div>';return;}
+  var maxFrac=(parseFloat(document.getElementById('mm-cap-max').value)||10)/100;
+  function card(stake,frac,extra){
+    return '<div style="background:#0f2030;border:1px solid #1e3a5f;border-radius:10px;padding:16px;max-width:440px">'
+      +'<div style="font-size:12px;color:#94a3b8">Stake consigliato</div>'
+      +'<div style="font-size:34px;font-weight:800;color:#22c55e;margin:2px 0">&euro;'+stake.toFixed(2)+'</div>'
+      +'<div style="font-size:12.5px;color:#cbd5e1">= '+(frac*100).toFixed(2)+'% del capitale</div>'
+      +extra+'</div>';
+  }
+  if(isFlat){
+    var flat=parseFloat(document.getElementById('mm-flat').value)||0;
+    var frac=Math.min(flat/100,maxFrac);
+    var cp=(flat/100>maxFrac)?'<br><span style="color:#f59e0b">Limitato al tetto del '+(maxFrac*100)+'%.</span>':'';
+    out.innerHTML=card(cap*frac,frac,'<div style="margin-top:8px;font-size:12.5px;color:#94a3b8">Strategia: Flat '+flat+'% del capitale (fisso, non usa l&#39;edge).'+cp+'</div>');
+    return;
+  }
+  var p=(parseFloat(document.getElementById('mm-prob').value)||0)/100;
+  var q=parseFloat(document.getElementById('mm-odds').value)||0;
+  if(q<=1||p<=0||p>=1){out.innerHTML='<div style="color:#f59e0b;font-size:13px">Inserisci probabilit&agrave; (1-99%) e quota (&gt;1) valide.</div>';return;}
+  var b=q-1, kfull=(b*p-(1-p))/b, edge=p-1/q;
+  var mult=strat==='k025'?0.25:(strat==='k050'?0.5:1.0);
+  var lab=strat==='k025'?'&frac14; Kelly':(strat==='k050'?'&frac12; Kelly':'Kelly pieno');
+  if(kfull<=0){
+    out.innerHTML='<div style="background:#3a1e1e;border:1px solid #7f1d1d;border-radius:10px;padding:14px;color:#fca5a5;font-size:13px">&#x274C; <b>Edge negativo ('+(edge*100).toFixed(1)+'%)</b>: la quota &egrave; troppo bassa per la tua probabilit&agrave;. <b>Non puntare</b> &mdash; stake &euro;0.</div>';
+    return;
+  }
+  var frac=kfull*mult, capped=(frac>maxFrac);
+  if(capped) frac=maxFrac;
+  var edgeCol=edge>=0.02?'#22c55e':'#f59e0b';
+  var extra='<div style="margin-top:10px;font-size:12.5px;color:#cbd5e1;line-height:1.75">'
+    +'Edge: <b style="color:'+edgeCol+'">'+(edge>=0?'+':'')+(edge*100).toFixed(1)+'%</b> &middot; Kelly pieno = '+(kfull*100).toFixed(1)+'% &middot; strategia <b>'+lab+'</b>'
+    +(capped?'<br><span style="color:#f59e0b">&#x26A0; Limitato al tetto del '+(maxFrac*100)+'% del capitale.</span>':'')
+    +(edge<0.02?'<br><span style="color:#f59e0b">&#x26A0; Edge sotto il 2%: spesso &egrave; solo rumore, valuta se saltare.</span>':'')
+    +'</div>';
+  out.innerHTML=card(cap*frac,frac,extra);
 }
 async function loadRecentMatches(){
   var full=document.getElementById('e-league').value;
