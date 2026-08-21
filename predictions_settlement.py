@@ -1570,7 +1570,8 @@ def register(app):
                    'overturned_won': 0, 'overturned_draw': 0, 'overturned_lost': 0}
             peg = {'tot': 0, '1': 0, 'X': 0, '2': 0}   # vantaggio annullato (parita' >0-0), split esito finale
             peg2 = {'tot': 0, '1': 0, 'X': 0, '2': 0}  # ...partendo da un doppio vantaggio (>=2)
-            peg_list = []                              # ultime 30 "vantaggio annullato -> 1/2" (piu' recenti)
+            peg_list = []                              # ultime 30 a vantaggio annullato (piu' recenti), esito 1/X/2
+            peg_signs = []                             # esito (1/X/2) di TUTTE le gare a vantaggio annullato, per le strisce
             total = 0
             for r in rows:
                 fh, fa = r['ft_home'], r['ft_away']
@@ -1622,25 +1623,49 @@ def register(app):
                 if tie_after_two:
                     peg2['tot'] += 1
                     peg2[sign] += 1
-                if tie_after_lead and fh != fa and len(peg_list) < 30:
-                    hh = aa = 0
-                    prog = []
-                    for (mn, aw) in tl:
-                        if aw:
-                            aa += 1
-                        else:
-                            hh += 1
-                        prog.append('%d-%d' % (hh, aa))
-                    peg_list.append({
-                        'date': r['date_str'], 'home': r['home_team'],
-                        'away': r['away_team'], 'final': '%d-%d' % (fh, fa),
-                        'sign': sign, 'two': tie_after_two, 'seq': prog})
+                if tie_after_lead:
+                    peg_signs.append(sign)             # in ordine DESC (piu' recente prima)
+                    if len(peg_list) < 30:
+                        hh = aa = 0
+                        prog = []
+                        for (mn, aw) in tl:
+                            if aw:
+                                aa += 1
+                            else:
+                                hh += 1
+                            prog.append('%d-%d' % (hh, aa))
+                        peg_list.append({
+                            'date': r['date_str'], 'home': r['home_team'],
+                            'away': r['away_team'], 'final': '%d-%d' % (fh, fa),
+                            'sign': sign, 'two': tie_after_two, 'seq': prog})
             def pct(n):
                 return round(100.0 * n / total, 1) if total else 0.0
             def pct_of(n, den):
                 return round(100.0 * n / den, 1) if den else 0.0
             overturned = cat['overturned_won'] + cat['overturned_draw'] + cat['overturned_lost']
             recovered = cat['overturned_won'] + cat['overturned_draw']
+
+            def _max_run(signs, target):
+                best = cur = 0
+                for s in signs:
+                    cur = cur + 1 if s == target else 0
+                    if cur > best:
+                        best = cur
+                return best
+
+            def _cur_run(signs, target):     # signs[0] = piu' recente
+                n = 0
+                for s in signs:
+                    if s == target:
+                        n += 1
+                    else:
+                        break
+                return n
+            peg_streak = {
+                'x_cur': _cur_run(peg_signs, 'X'), 'x_max': _max_run(peg_signs, 'X'),
+                'h_max': _max_run(peg_signs, '1'), 'a_max': _max_run(peg_signs, '2'),
+                'n': len(peg_signs),
+            }
             return jsonify({
                 'league_id': lid, 'first': first or 'qualsiasi', 'total': total,
                 'categories': cat, 'pct': {k: pct(v) for k, v in cat.items()},
@@ -1662,6 +1687,7 @@ def register(app):
                     'decisive_pct': pct_of(peg2['1'] + peg2['2'], peg2['tot']),
                 },
                 'pegged_list': peg_list,
+                'pegged_streak': peg_streak,
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
