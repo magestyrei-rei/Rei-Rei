@@ -1562,13 +1562,15 @@ def register(app):
             con = _sqlite3.connect(_LOCAL_DB)
             con.row_factory = _sqlite3.Row
             rows = con.execute(
-                "SELECT goals_html, goals_text, ft_home, ft_away FROM matches WHERE league_id=?",
+                "SELECT date_str, home_team, away_team, goals_html, goals_text, ft_home, ft_away "
+                "FROM matches WHERE league_id=? ORDER BY sort_date DESC, time_str DESC",
                 (lid,)).fetchall()
             con.close()
             cat = {'held_won': 0, 'never_behind_draw': 0,
                    'overturned_won': 0, 'overturned_draw': 0, 'overturned_lost': 0}
             peg = {'tot': 0, '1': 0, 'X': 0, '2': 0}   # vantaggio annullato (parita' >0-0), split esito finale
             peg2 = {'tot': 0, '1': 0, 'X': 0, '2': 0}  # ...partendo da un doppio vantaggio (>=2)
+            peg_list = []                              # ultime 30 "vantaggio annullato -> 1/2" (piu' recenti)
             total = 0
             for r in rows:
                 fh, fa = r['ft_home'], r['ft_away']
@@ -1620,6 +1622,19 @@ def register(app):
                 if tie_after_two:
                     peg2['tot'] += 1
                     peg2[sign] += 1
+                if tie_after_lead and fh != fa and len(peg_list) < 30:
+                    hh = aa = 0
+                    prog = []
+                    for (mn, aw) in tl:
+                        if aw:
+                            aa += 1
+                        else:
+                            hh += 1
+                        prog.append('%d-%d' % (hh, aa))
+                    peg_list.append({
+                        'date': r['date_str'], 'home': r['home_team'],
+                        'away': r['away_team'], 'final': '%d-%d' % (fh, fa),
+                        'sign': sign, 'two': tie_after_two, 'seq': prog})
             def pct(n):
                 return round(100.0 * n / total, 1) if total else 0.0
             def pct_of(n, den):
@@ -1646,6 +1661,7 @@ def register(app):
                     'decisive': peg2['1'] + peg2['2'],
                     'decisive_pct': pct_of(peg2['1'] + peg2['2'], peg2['tot']),
                 },
+                'pegged_list': peg_list,
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
