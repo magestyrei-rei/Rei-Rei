@@ -1686,6 +1686,39 @@ async function loadComebacks(){
     });
     h+='</tbody></table></div>';
     h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Il tuo caso (1-0 &rarr; 1-2 &rarr; 2-2 o 3-2) = le righe <b>Ribaltato poi recuperato</b>: <b>'+d.recovered_pct+'%</b> delle partite.</div>';
+    var pg=d.pegged||{tot:0}, pg2=d.pegged_two||{tot:0};
+    h+='<div style="margin-top:18px;padding-top:14px;border-top:2px solid #1e293b">';
+    h+='<div style="font-weight:700;color:#e2e8f0;margin-bottom:4px">Vantaggio annullato, ma niente pareggio</div>';
+    h+='<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Partite dove il vantaggio (anche doppio) e&#39; stato raggiunto in parita&#39; (1-1, 2-2&hellip;), ma finite comunque con un segno. Es. 1-0&rarr;1-1&rarr;2-1 oppure 2-0&rarr;2-2&rarr;3-2.</div>';
+    if(!pg.tot){
+      h+='<div style="color:#64748b;font-size:13px">Nessuna partita con vantaggio annullato in questo filtro.</div>';
+    }else{
+      h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px">';
+      h+=_betCard('Vantaggio annullato',pg.tot+' ('+pg.tot_pct+'%)','#f59e0b');
+      h+=_betCard('Poi finite con un segno (1 o 2)',pg.decisive_pct+'% ('+pg.decisive+')','#22c55e');
+      h+=_betCard('Poi finite in pari (X)',pg.draw_pct+'% ('+pg.draw+')','#f87171');
+      h+='</div>';
+      h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#1d4ed8;color:#fff">'
+        +'<th style="padding:7px 10px;text-align:left">Dopo il vantaggio annullato, esito finale</th>'
+        +'<th style="padding:7px 10px;text-align:center">Partite</th>'
+        +'<th style="padding:7px 10px;text-align:center">%</th></tr></thead><tbody>';
+      var pr=[
+        ['1 (Casa vince)',pg.home,pg.home_pct,'#22c55e'],
+        ['X (Pareggio)',pg.draw,pg.draw_pct,'#f87171'],
+        ['2 (Ospite vince)',pg.away,pg.away_pct,'#22c55e']
+      ];
+      pr.forEach(function(x){
+        h+='<tr style="border-top:1px solid #1e293b">'
+          +'<td style="padding:6px 10px;color:#cbd5e1">'+x[0]+'</td>'
+          +'<td style="padding:6px 10px;text-align:center;color:#94a3b8">'+x[1]+'</td>'
+          +'<td style="padding:6px 10px;text-align:center;font-weight:700;color:'+x[3]+'">'+x[2]+'%</td></tr>';
+      });
+      h+='</tbody></table></div>';
+      if(pg2.tot){
+        h+='<div style="margin-top:8px;font-size:12px;color:#94a3b8">Di cui con <b>doppio vantaggio</b> poi raggiunto (es. 2-0&rarr;2-2): <b>'+pg2.tot+'</b> ('+pg2.tot_pct+'%), poi finite con un segno nel <b>'+pg2.decisive_pct+'%</b> dei casi.</div>';
+      }
+    }
+    h+='</div>';
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }

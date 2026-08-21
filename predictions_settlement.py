@@ -1567,6 +1567,8 @@ def register(app):
             con.close()
             cat = {'held_won': 0, 'never_behind_draw': 0,
                    'overturned_won': 0, 'overturned_draw': 0, 'overturned_lost': 0}
+            peg = {'tot': 0, '1': 0, 'X': 0, '2': 0}   # vantaggio annullato (parita' >0-0), split esito finale
+            peg2 = {'tot': 0, '1': 0, 'X': 0, '2': 0}  # ...partendo da un doppio vantaggio (>=2)
             total = 0
             for r in rows:
                 fh, fa = r['ft_home'], r['ft_away']
@@ -1582,6 +1584,7 @@ def register(app):
                     continue
                 h = a = 0
                 behind = False
+                had_lead = had_two = tie_after_lead = tie_after_two = False
                 for (mn, aw) in tl:
                     if aw:
                         a += 1
@@ -1591,6 +1594,16 @@ def register(app):
                         behind = True
                     elif (not fa_first) and a > h:  # 1o marcatore = casa -> sotto se ospite supera
                         behind = True
+                    d = h - a
+                    if d != 0:                      # qualcuno e' in vantaggio
+                        had_lead = True
+                        if abs(d) >= 2:
+                            had_two = True
+                    elif (h + a) > 0:               # parita' non 0-0 -> vantaggio annullato
+                        if had_lead:
+                            tie_after_lead = True
+                        if had_two:
+                            tie_after_two = True
                 if fa_first:
                     fs_win, draw = fa > fh, fa == fh
                 else:
@@ -1600,8 +1613,17 @@ def register(app):
                     cat['held_won' if fs_win else 'never_behind_draw'] += 1
                 else:
                     cat['overturned_won' if fs_win else ('overturned_draw' if draw else 'overturned_lost')] += 1
+                sign = '1' if fh > fa else ('2' if fa > fh else 'X')
+                if tie_after_lead:
+                    peg['tot'] += 1
+                    peg[sign] += 1
+                if tie_after_two:
+                    peg2['tot'] += 1
+                    peg2[sign] += 1
             def pct(n):
                 return round(100.0 * n / total, 1) if total else 0.0
+            def pct_of(n, den):
+                return round(100.0 * n / den, 1) if den else 0.0
             overturned = cat['overturned_won'] + cat['overturned_draw'] + cat['overturned_lost']
             recovered = cat['overturned_won'] + cat['overturned_draw']
             return jsonify({
@@ -1609,6 +1631,21 @@ def register(app):
                 'categories': cat, 'pct': {k: pct(v) for k, v in cat.items()},
                 'overturned': overturned, 'overturned_pct': pct(overturned),
                 'recovered': recovered, 'recovered_pct': pct(recovered),
+                'pegged': {
+                    'tot': peg['tot'], 'tot_pct': pct(peg['tot']),
+                    'home': peg['1'], 'draw': peg['X'], 'away': peg['2'],
+                    'home_pct': pct_of(peg['1'], peg['tot']),
+                    'draw_pct': pct_of(peg['X'], peg['tot']),
+                    'away_pct': pct_of(peg['2'], peg['tot']),
+                    'decisive': peg['1'] + peg['2'],
+                    'decisive_pct': pct_of(peg['1'] + peg['2'], peg['tot']),
+                },
+                'pegged_two': {
+                    'tot': peg2['tot'], 'tot_pct': pct(peg2['tot']),
+                    'home': peg2['1'], 'draw': peg2['X'], 'away': peg2['2'],
+                    'decisive': peg2['1'] + peg2['2'],
+                    'decisive_pct': pct_of(peg2['1'] + peg2['2'], peg2['tot']),
+                },
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
