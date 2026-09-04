@@ -822,6 +822,28 @@ def _refresh_live_eg(send_telegram=False):
             pass
     return {'live_earlygoal': len(out), 'telegram_sent': sent}
 
+# === Gol tardivi: cache in-memory dei minuti-gol per match (build una volta) ===
+_LATE_CACHE = {'built': False, 'rows': None, 'names': None}
+
+
+def _late_build():
+    """Costruisce UNA volta la lista (league_id, tuple(minuti_gol)) di tutti i
+    match giocati, cosi' /api/late-goals conta i gol dopo un minuto qualsiasi
+    senza ri-parsare le timeline ad ogni richiesta."""
+    con = _sqlite3.connect(_LOCAL_DB)
+    con.row_factory = _sqlite3.Row
+    names = {r['id']: r['name'] for r in con.execute('SELECT id, name FROM leagues')}
+    data = []
+    for r in con.execute("SELECT league_id, goals_html, goals_text FROM matches WHERE ft_home IS NOT NULL"):
+        tl = _bet_timeline(r['goals_html'], r['goals_text'])
+        if not tl:
+            continue
+        mins = tuple(mn for (mn, aw) in tl if mn is not None)
+        data.append((r['league_id'], mins))
+    con.close()
+    return data, names
+
+
 # ---------- routes ----------
 
 def register(app):
@@ -1689,6 +1711,44 @@ def register(app):
                 'pegged_list': peg_list,
                 'pegged_streak': peg_streak,
             })
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/late-goals')
+    def api_late_goals():
+        """Per (minuto): istogramma dei gol segnati DAL minuto in poi (>=minuto)
+        per ogni campionato -> il frontend deriva sia >=N sia =N gol. Universo:
+        la nicchia early-goal (1o gol <=16')."""
+        try:
+            minute = int(request.args.get('minute') or 65)
+            minute = max(0, min(120, minute))
+            if not _LATE_CACHE['built']:
+                _LATE_CACHE['rows'], _LATE_CACHE['names'] = _late_build()
+                _LATE_CACHE['built'] = True
+            rows = _LATE_CACHE['rows']
+            names = _LATE_CACHE['names']
+            CAP = 6
+            agg = {}
+            tot_hist = [0] * (CAP + 1)
+            tot_n = 0
+            for (lid, mins) in rows:
+                late = 0
+                for mn in mins:
+                    if mn >= minute:
+                        late += 1
+                idx = late if late < CAP else CAP
+                a = agg.get(lid)
+                if a is None:
+                    a = agg[lid] = {'n': 0, 'hist': [0] * (CAP + 1)}
+                a['n'] += 1
+                a['hist'][idx] += 1
+                tot_n += 1
+                tot_hist[idx] += 1
+            out = [{'league_id': lid, 'league': names.get(lid, str(lid)),
+                    'n': a['n'], 'hist': a['hist']} for lid, a in agg.items()]
+            out.sort(key=lambda x: -x['n'])
+            return jsonify({'minute': minute, 'total_n': tot_n,
+                            'total_hist': tot_hist, 'cap': CAP, 'leagues': out})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 

@@ -87,6 +87,7 @@
      <div class="tab" data-view="andamento">&#x1F4C8; Andamento</div>
      <div class="tab" data-view="radar">&#x1F6A6; Radar</div>
      <div class="tab" data-view="money">&#x1F4B0; Money</div>
+     <div class="tab" data-view="late">&#x23F1;&#xFE0F; Gol tardivi</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -153,6 +154,26 @@
     </div>
     <div style="margin-bottom:14px;font-size:12.5px;color:#cbd5e1"><label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer"><input type="checkbox" id="mm-fallback" onchange="calcMoney()" style="width:auto;margin:0"> Mostra lo stake anche senza edge (<b>Flat di ripiego</b>) &mdash; utile sugli Over, dove l&#39;edge positivo &egrave; raro</label></div>
     <div id="mm-out"></div>
+  </section>
+
+  <section class="view" id="view-late">
+    <style>#view-late select,#view-late input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-late label{font-size:11px;color:#94a3b8;display:block;margin-bottom:2px}#view-late th{padding:7px 9px}#view-late td{padding:6px 9px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x23F1;&#xFE0F; <b>Come si usa:</b> scegli il <b>minuto</b> di partenza e quanti <b>gol</b> considerare &rarr; vedi la classifica dei campionati per quante volte, <b>da quel minuto in poi</b>, arrivano <b>almeno N</b> (o <b>esattamente N</b>) gol. Le colonne 1/2/3/4 sono sempre visibili per confrontare la differenza. <b>Universo:</b> la nicchia early-goal (1&deg; gol &le;16&rsquo;).</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px;max-width:640px">
+      <div><label>Dal minuto</label><input type="number" id="late-minute" value="65" min="0" max="120" step="1" onchange="loadLate()"></div>
+      <div><label>Gol (evidenzia/ordina)</label><select id="late-goals" onchange="renderLate()">
+        <option value="1">1 gol</option>
+        <option value="2" selected>2 gol</option>
+        <option value="3">3 gol</option>
+        <option value="4">4 gol</option>
+      </select></div>
+      <div><label>Modalit&agrave;</label><select id="late-mode" onchange="renderLate()">
+        <option value="ge" selected>Almeno (&ge;N)</option>
+        <option value="eq">Esatti (=N)</option>
+      </select></div>
+      <div><label>Min. partite</label><input type="number" id="late-minn" value="0" min="0" step="10" onchange="renderLate()"></div>
+    </div>
+    <div id="late-box"><div style="color:#64748b;font-size:13px">Carico&hellip;</div></div>
   </section>
 
   <section class="view" id="view-comeback">
@@ -632,6 +653,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "radar") loadRadarInit();
     if (t.dataset.view === "casi") loadCasiInit();
     if (t.dataset.view === "money") calcMoney();
+    if (t.dataset.view === "late") loadLateInit();
   });
 });
 
@@ -1840,6 +1862,59 @@ function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTime
 
 // === Radar ritardi & strisce (vicinanza al record storico) ===
 var _radarData=null,_radLeaguesLoaded=false;
+// === Gol tardivi (classifica campionati per gol dal minuto X) ===
+var _lateData=null;
+function loadLateInit(){ if(!_lateData) loadLate(); }
+async function loadLate(){
+  var box=document.getElementById('late-box');
+  var mn=parseInt(document.getElementById('late-minute').value);
+  if(isNaN(mn)) mn=65;
+  box.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo su tutte le partite&hellip;</div>';
+  try{
+    var r=await fetch('/api/late-goals?minute='+mn);
+    var d=await r.json();
+    if(d.error){box.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    _lateData=d;
+    renderLate();
+  }catch(e){box.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function renderLate(){
+  var box=document.getElementById('late-box');
+  if(!_lateData){box.innerHTML='<div style="color:#64748b;font-size:13px">Premi aggiorna.</div>';return;}
+  var d=_lateData;
+  var N=parseInt(document.getElementById('late-goals').value)||2;
+  var mode=document.getElementById('late-mode').value;
+  var minn=parseInt(document.getElementById('late-minn').value)||0;
+  function val(hist,k){ if(mode==='eq'){return hist[k]||0;} var s=0; for(var i=k;i<hist.length;i++)s+=(hist[i]||0); return s; }
+  function pct(a,b){ return b? Math.round(1000*a/b)/10 : 0; }
+  var sym=(mode==='eq')?'=':'&ge;';
+  var tn=d.total_n;
+  var h='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">';
+  for(var k=1;k<=4;k++){
+    var v=val(d.total_hist,k), p=pct(v,tn), on=(k===N);
+    h+='<div style="flex:1;min-width:120px;background:'+(on?'#12324a':'#0f172a')+';border:1px solid '+(on?'#1d4ed8':'#1e293b')+';border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">Totale &middot; '+sym+k+' gol</div><div style="font-size:18px;font-weight:700;color:#e2e8f0">'+p+'%</div><div style="font-size:11px;color:#64748b">'+v+' / '+tn+'</div></div>';
+  }
+  h+='</div>';
+  h+='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">Dal <b>'+d.minute+'&rsquo;</b> in poi &middot; ordinato per <b>'+sym+N+' gol</b>'+(minn>0?(' &middot; min '+minn+' partite'):'')+'</div>';
+  var ls=d.leagues.filter(function(l){return l.n>=minn;});
+  ls.sort(function(a,b){ return pct(val(b.hist,N),b.n)-pct(val(a.hist,N),a.n); });
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#1d4ed8;color:#fff">'
+    +'<th style="text-align:left">#</th><th style="text-align:left">Campionato</th><th style="text-align:center">n</th>';
+  for(var c=1;c<=4;c++){ h+='<th style="text-align:center'+(c===N?';background:#12324a':'')+'">'+sym+c+'</th>'; }
+  h+='</tr></thead><tbody>';
+  ls.forEach(function(l,i){
+    h+='<tr style="border-top:1px solid #1e293b"><td style="color:#64748b">'+(i+1)+'</td><td style="color:#e2e8f0">'+l.league+'</td><td style="text-align:center;color:#94a3b8">'+l.n+'</td>';
+    for(var c2=1;c2<=4;c2++){
+      var pp=pct(val(l.hist,c2),l.n), onc=(c2===N);
+      h+='<td style="text-align:center;font-weight:'+(onc?'700':'400')+';background:'+(onc?'#0f2030':'transparent')+';color:'+(onc?'#38bdf8':'#cbd5e1')+'">'+pp+'%</td>';
+    }
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  if(!ls.length) h+='<div style="color:#64748b;font-size:13px;margin-top:8px">Nessun campionato con almeno '+minn+' partite.</div>';
+  box.innerHTML=h;
+}
+
 async function loadRadarInit(){
   if(!_radLeaguesLoaded){
     _radLeaguesLoaded=true;
