@@ -479,6 +479,7 @@ def _ensure_egl():
 
 import sqlite3 as _sqlite3
 import re as _re_bets
+import threading as _threading
 
 _LOCAL_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'football.db')
 
@@ -837,6 +838,7 @@ def _ro_con(timeout=15.0):
 
 # === Gol tardivi: cache in-memory dei minuti-gol per match (build una volta) ===
 _LATE_CACHE = {'built': False, 'rows': None, 'names': None}
+_LATE_LOCK = _threading.Lock()   # una sola build anche con richieste concorrenti
 
 
 def _late_build():
@@ -1735,8 +1737,10 @@ def register(app):
             minute = int(request.args.get('minute') or 65)
             minute = max(0, min(120, minute))
             if not _LATE_CACHE['built']:
-                _LATE_CACHE['rows'], _LATE_CACHE['names'] = _late_build()
-                _LATE_CACHE['built'] = True
+                with _LATE_LOCK:                       # evita build concorrenti multiple
+                    if not _LATE_CACHE['built']:
+                        _LATE_CACHE['rows'], _LATE_CACHE['names'] = _late_build()
+                        _LATE_CACHE['built'] = True
             rows = _LATE_CACHE['rows']
             names = _LATE_CACHE['names']
             CAP = 6
