@@ -822,6 +822,19 @@ def _refresh_live_eg(send_telegram=False):
             pass
     return {'live_earlygoal': len(out), 'telegram_sent': sent}
 
+def _ro_con(timeout=15.0):
+    """Connessione al DB locale con busy_timeout: sotto contesa (es. archiver in
+    scrittura) aspetta invece di dare subito 'database is locked'. Con WAL attivo
+    i lock sono comunque rari."""
+    con = _sqlite3.connect(_LOCAL_DB, timeout=timeout)
+    con.row_factory = _sqlite3.Row
+    try:
+        con.execute("PRAGMA busy_timeout=15000")
+    except Exception:
+        pass
+    return con
+
+
 # === Gol tardivi: cache in-memory dei minuti-gol per match (build una volta) ===
 _LATE_CACHE = {'built': False, 'rows': None, 'names': None}
 
@@ -830,8 +843,7 @@ def _late_build():
     """Costruisce UNA volta la lista (league_id, tuple(minuti_gol)) di tutti i
     match giocati, cosi' /api/late-goals conta i gol dopo un minuto qualsiasi
     senza ri-parsare le timeline ad ogni richiesta."""
-    con = _sqlite3.connect(_LOCAL_DB)
-    con.row_factory = _sqlite3.Row
+    con = _ro_con()
     names = {r['id']: r['name'] for r in con.execute('SELECT id, name FROM leagues')}
     data = []
     for r in con.execute("SELECT league_id, goals_html, goals_text FROM matches WHERE ft_home IS NOT NULL"):
@@ -1765,8 +1777,7 @@ def register(app):
             limit = min(int(request.args.get('limit') or 30), 100)
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
-            con = _sqlite3.connect(_LOCAL_DB)
-            con.row_factory = _sqlite3.Row
+            con = _ro_con()
             sql = ("SELECT date_str, home_team, away_team, ft_home, ft_away, "
                    "first_goal_team, goals_html, goals_text FROM matches "
                    "WHERE league_id=? AND ft_home IS NOT NULL")

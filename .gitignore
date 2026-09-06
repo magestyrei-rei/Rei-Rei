@@ -4,3 +4,5 @@ __pycache__/
 .env
 run.bat
 football.db
+football.db-wal
+football.db-shm
