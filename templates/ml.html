@@ -159,8 +159,16 @@
   <section class="view" id="view-late">
     <style>#view-late select,#view-late input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-late label{font-size:11px;color:#94a3b8;display:block;margin-bottom:2px}#view-late th{padding:7px 9px}#view-late td{padding:6px 9px}</style>
     <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">&#x23F1;&#xFE0F; <b>Come si usa:</b> scegli il <b>minuto</b> di partenza e quanti <b>gol</b> considerare &rarr; vedi la classifica dei campionati per quante volte, <b>da quel minuto in poi</b>, arrivano <b>almeno N</b> (o <b>esattamente N</b>) gol. Le colonne 1/2/3/4 sono sempre visibili per confrontare la differenza. <b>Universo:</b> la nicchia early-goal (1&deg; gol &le;16&rsquo;).</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+      <div><label>Campionato (ultime 30)</label><select id="late-league" onchange="loadLateMatches()" style="min-width:200px"><option value="">&mdash; nessuno (solo classifica) &mdash;</option></select></div>
+      <div><label>1&deg; gol di</label><select id="late-first" onchange="loadLateMatches()">
+        <option value="">Qualsiasi</option>
+        <option value="home">Casa</option>
+        <option value="away">Ospite</option>
+      </select></div>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px;max-width:640px">
-      <div><label>Dal minuto</label><input type="number" id="late-minute" value="65" min="0" max="120" step="1" onchange="loadLate()"></div>
+      <div><label>Dal minuto</label><input type="number" id="late-minute" value="65" min="0" max="120" step="1" onchange="loadLate();loadLateMatches()"></div>
       <div><label>Gol (evidenzia/ordina)</label><select id="late-goals" onchange="renderLate()">
         <option value="1">1 gol</option>
         <option value="2" selected>2 gol</option>
@@ -173,6 +181,7 @@
       </select></div>
       <div><label>Min. partite</label><input type="number" id="late-minn" value="0" min="0" step="10" onchange="renderLate()"></div>
     </div>
+    <div id="late-matches-box" style="margin-bottom:16px"></div>
     <div id="late-box"><div style="color:#64748b;font-size:13px">Carico&hellip;</div></div>
   </section>
 
@@ -1863,8 +1872,62 @@ function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTime
 // === Radar ritardi & strisce (vicinanza al record storico) ===
 var _radarData=null,_radLeaguesLoaded=false;
 // === Gol tardivi (classifica campionati per gol dal minuto X) ===
-var _lateData=null;
-function loadLateInit(){ if(!_lateData) loadLate(); }
+var _lateData=null, _lateLeaguesLoaded=false;
+async function loadLateInit(){
+  if(!_lateLeaguesLoaded){
+    _lateLeaguesLoaded=true;
+    try{
+      var r=await fetch('/api/leagues');var d=await r.json();
+      var arr=Array.isArray(d)?d:(d.leagues||[]);
+      arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      var sel=document.getElementById('late-league');
+      arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+    }catch(e){}
+  }
+  if(!_lateData) loadLate();
+}
+async function loadLateMatches(){
+  var box=document.getElementById('late-matches-box');
+  var lid=document.getElementById('late-league').value;
+  if(!lid){ box.innerHTML=''; return; }
+  var mn=parseInt(document.getElementById('late-minute').value); if(isNaN(mn)) mn=65;
+  var first=document.getElementById('late-first').value;
+  box.innerHTML='<div style="color:#94a3b8;padding:8px">Carico ultime 30&hellip;</div>';
+  try{
+    var r=await fetch('/api/late-goals-matches?league='+lid+'&minute='+mn+(first?('&first='+first):''));
+    var d=await r.json();
+    if(d.error){box.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    renderLateMatches(d);
+  }catch(e){box.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function renderLateMatches(d){
+  var box=document.getElementById('late-matches-box');
+  var ms=d.matches||[];
+  var fh=(d.first==='home')?'Casa':((d.first==='away')?'Ospite':'Qualsiasi');
+  var h='<div style="margin-bottom:6px;font-weight:700;color:#e2e8f0">Ultime '+ms.length+' partite &middot; dal <b>'+d.minute+'&rsquo;</b> in poi &middot; 1&deg; gol: <b>'+fh+'</b></div>';
+  if(!ms.length){ box.innerHTML=h+'<div style="color:#64748b;font-size:13px">Nessuna partita per questo filtro.</div>'; return; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#0f172a;color:#94a3b8">'
+    +'<th style="text-align:left;padding:6px 8px">Data</th>'
+    +'<th style="text-align:left;padding:6px 8px">Partita</th>'
+    +'<th style="text-align:center;padding:6px 8px">Al '+d.minute+'&rsquo;</th>'
+    +'<th style="text-align:center;padding:6px 8px">Finale</th>'
+    +'<th style="text-align:center;padding:6px 8px">Gol dal '+d.minute+'&rsquo;</th>'
+    +'<th style="text-align:center;padding:6px 8px">1&deg; gol</th></tr></thead><tbody>';
+  ms.forEach(function(m){
+    var fg=(m.fg_team==='home')?'<span style="color:#22c55e">Casa</span>':((m.fg_team==='away')?'<span style="color:#38bdf8">Ospite</span>':'&mdash;');
+    var lm=(m.late_mins&&m.late_mins.length)?(' <span style="color:#64748b">('+m.late_mins.map(function(x){return x+'&rsquo;';}).join(' ')+')</span>'):'';
+    var lc=(m.late>0)?'#f59e0b':'#64748b';
+    h+='<tr style="border-top:1px solid #1e293b">'
+      +'<td style="padding:5px 8px;color:#94a3b8;white-space:nowrap">'+(m.date||'')+'</td>'
+      +'<td style="padding:5px 8px;color:#e2e8f0">'+m.home+' &ndash; '+m.away+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;color:#94a3b8">'+m.pre+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;color:#e2e8f0;font-weight:600">'+m.final+'</td>'
+      +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+lc+'">'+m.late+lm+'</td>'
+      +'<td style="padding:5px 8px;text-align:center">'+fg+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  box.innerHTML=h;
+}
 async function loadLate(){
   var box=document.getElementById('late-box');
   var mn=parseInt(document.getElementById('late-minute').value);

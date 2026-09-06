@@ -1752,6 +1752,59 @@ def register(app):
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
+    @app.route('/api/late-goals-matches')
+    def api_late_goals_matches():
+        """Ultime N partite di UN campionato: parziale al minuto scelto, finale e
+        gol segnati DAL minuto in poi (>=minuto). Filtrabile per chi ha segnato
+        il 1o gol (first=home|away)."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            minute = int(request.args.get('minute') or 65)
+            minute = max(0, min(120, minute))
+            first = (request.args.get('first') or '').strip()
+            limit = min(int(request.args.get('limit') or 30), 100)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            con = _sqlite3.connect(_LOCAL_DB)
+            con.row_factory = _sqlite3.Row
+            sql = ("SELECT date_str, home_team, away_team, ft_home, ft_away, "
+                   "first_goal_team, goals_html, goals_text FROM matches "
+                   "WHERE league_id=? AND ft_home IS NOT NULL")
+            params = [lid]
+            if first in ('home', 'away'):
+                sql += " AND first_goal_team = ?"
+                params.append(first)
+            sql += " ORDER BY sort_date DESC, time_str DESC LIMIT ?"
+            params.append(limit)
+            rows = con.execute(sql, params).fetchall()
+            con.close()
+            out = []
+            for r in rows:
+                tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                pre_h = pre_a = 0
+                late_mins = []
+                for (mn, aw) in tl:
+                    if mn is None:
+                        continue
+                    if mn < minute:
+                        if aw:
+                            pre_a += 1
+                        else:
+                            pre_h += 1
+                    else:
+                        late_mins.append(mn)
+                out.append({
+                    'date': r['date_str'], 'home': r['home_team'], 'away': r['away_team'],
+                    'pre': '%d-%d' % (pre_h, pre_a),
+                    'final': '%d-%d' % (r['ft_home'], r['ft_away']),
+                    'late': len(late_mins), 'late_mins': late_mins,
+                    'fg_team': r['first_goal_team'],
+                })
+            return jsonify({'league_id': lid, 'minute': minute,
+                            'first': first or 'qualsiasi', 'n': len(out), 'matches': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
     @app.route('/api/live-read')
     def api_live_read():
         """Cruscotto live: per (campionato, minuto, punteggio attuale) restituisce
