@@ -1782,20 +1782,18 @@ def register(app):
             if not lid:
                 return jsonify({'error': 'parametro league richiesto'}), 400
             con = _ro_con()
-            sql = ("SELECT date_str, home_team, away_team, ft_home, ft_away, "
-                   "first_goal_team, goals_html, goals_text FROM matches "
-                   "WHERE league_id=? AND ft_home IS NOT NULL")
-            params = [lid]
-            if first in ('home', 'away'):
-                sql += " AND first_goal_team = ?"
-                params.append(first)
-            sql += " ORDER BY sort_date DESC, time_str DESC LIMIT ?"
-            params.append(limit)
-            rows = con.execute(sql, params).fetchall()
+            rows = con.execute(
+                "SELECT date_str, home_team, away_team, ft_home, ft_away, "
+                "first_goal_team, goals_html, goals_text FROM matches "
+                "WHERE league_id=? AND ft_home IS NOT NULL "
+                "ORDER BY sort_date ASC, time_str ASC", (lid,)).fetchall()
             con.close()
-            out = []
+            seq = []        # gol dal minuto per partita, cronologico (vecchia->nuova), TUTTE
+            display = []    # partite per la lista (rispetta il filtro 1o gol)
             for r in rows:
                 tl = _bet_timeline(r['goals_html'], r['goals_text'])
+                if not tl:
+                    continue
                 pre_h = pre_a = 0
                 late_mins = []
                 for (mn, aw) in tl:
@@ -1808,15 +1806,21 @@ def register(app):
                             pre_h += 1
                     else:
                         late_mins.append(mn)
-                out.append({
+                seq.append(len(late_mins))
+                fg = r['first_goal_team']
+                if first in ('home', 'away') and fg != first:
+                    continue
+                display.append({
                     'date': r['date_str'], 'home': r['home_team'], 'away': r['away_team'],
                     'pre': '%d-%d' % (pre_h, pre_a),
                     'final': '%d-%d' % (r['ft_home'], r['ft_away']),
                     'late': len(late_mins), 'late_mins': late_mins,
-                    'fg_team': r['first_goal_team'],
+                    'fg_team': fg,
                 })
+            matches_out = list(reversed(display[-limit:]))   # ultime N, piu' recente prima
             return jsonify({'league_id': lid, 'minute': minute,
-                            'first': first or 'qualsiasi', 'n': len(out), 'matches': out})
+                            'first': first or 'qualsiasi', 'n': len(matches_out),
+                            'matches': matches_out, 'seq': seq})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 

@@ -1869,7 +1869,7 @@ function stopAndamentoRefresh(){ if(_andTimer){clearInterval(_andTimer);_andTime
 // === Radar ritardi & strisce (vicinanza al record storico) ===
 var _radarData=null,_radLeaguesLoaded=false;
 // === Gol tardivi (classifica campionati per gol dal minuto X) ===
-var _lateData=null, _lateLeaguesLoaded=false;
+var _lateData=null, _lateMatchData=null, _lateLeaguesLoaded=false;
 async function loadLateInit(){
   if(!_lateLeaguesLoaded){
     _lateLeaguesLoaded=true;
@@ -1886,7 +1886,7 @@ async function loadLateInit(){
 async function loadLateMatches(){
   var box=document.getElementById('late-matches-box');
   var lid=document.getElementById('late-league').value;
-  if(!lid){ box.innerHTML=''; return; }
+  if(!lid){ _lateMatchData=null; box.innerHTML=''; return; }
   var mn=parseInt(document.getElementById('late-minute').value); if(isNaN(mn)) mn=65;
   var first=document.getElementById('late-first').value;
   box.innerHTML='<div style="color:#94a3b8;padding:8px">Carico ultime 30&hellip;</div>';
@@ -1894,7 +1894,9 @@ async function loadLateMatches(){
     var r=await fetch('/api/late-goals-matches?league='+lid+'&minute='+mn+(first?('&first='+first):''));
     var d=await r.json();
     if(d.error){box.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    _lateMatchData=d;
     renderLateMatches(d);
+    renderLate();
   }catch(e){box.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
 function renderLateMatches(d){
@@ -1960,6 +1962,20 @@ function renderLate(){
     h+='<div style="background:'+(on?'#12324a':'#0f172a')+';border:1px solid '+(on?'#1d4ed8':'#1e293b')+';border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">'+sym+k+' gol dal '+d.minute+'&rsquo;</div><div style="font-size:18px;font-weight:700;color:#e2e8f0">'+p+'%</div><div style="font-size:11px;color:#64748b">'+v+' / '+nTot+' partite</div></div>';
   }
   h+='</div>';
+  var lm=_lateMatchData;
+  if(lid && lm && String(lm.league_id)===String(lid) && lm.minute===d.minute && lm.seq){
+    var seq=lm.seq, maxPos=0, maxNeg=0, curPos=0, curNeg=0;
+    for(var s=0;s<seq.length;s++){
+      var okc=(mode==='eq')?(seq[s]===N):(seq[s]>=N);
+      if(okc){ curPos++; curNeg=0; if(curPos>maxPos)maxPos=curPos; }
+      else { curNeg++; curPos=0; if(curNeg>maxNeg)maxNeg=curNeg; }
+    }
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px">';
+    h+='<div style="background:#0f2616;border:1px solid #14532d;border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">Striscia POSITIVA max &middot; '+sym+N+' gol</div><div style="font-size:18px;font-weight:700;color:#22c55e">'+maxPos+'</div><div style="font-size:11px;color:#64748b">partite di fila che rispettano</div></div>';
+    h+='<div style="background:#2a1212;border:1px solid #7f1d1d;border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">Striscia NEGATIVA max &middot; '+sym+N+' gol</div><div style="font-size:18px;font-weight:700;color:#f87171">'+maxNeg+'</div><div style="font-size:11px;color:#64748b">partite di fila che NON rispettano</div></div>';
+    h+='</div>';
+    h+='<div style="margin-top:6px;font-size:11px;color:#64748b">Strisce record su tutte le '+seq.length+' partite del campionato (ordine cronologico).</div>';
+  }
   box.innerHTML=h;
 }
 
