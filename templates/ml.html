@@ -1959,9 +1959,11 @@ function renderLate(){
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">';
   for(var k=1;k<=4;k++){
     var v=val(hist,k), p=pct(v,nTot), on=(k===N);
-    h+='<div style="background:'+(on?'#12324a':'#0f172a')+';border:1px solid '+(on?'#1d4ed8':'#1e293b')+';border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">'+sym+k+' gol dal '+d.minute+'&rsquo;</div><div style="font-size:18px;font-weight:700;color:#e2e8f0">'+p+'%</div><div style="font-size:11px;color:#64748b">'+v+' / '+nTot+' partite</div></div>';
+    var qm=(v>0)?(nTot/v).toFixed(2):'&mdash;';
+    h+='<div style="background:'+(on?'#12324a':'#0f172a')+';border:1px solid '+(on?'#1d4ed8':'#1e293b')+';border-radius:6px;padding:8px 10px"><div style="font-size:11px;color:#94a3b8">'+sym+k+' gol dal '+d.minute+'&rsquo;</div><div style="font-size:18px;font-weight:700;color:#e2e8f0">'+p+'%</div><div style="font-size:12px;font-weight:700;color:#f59e0b">quota min '+qm+'</div><div style="font-size:11px;color:#64748b">'+v+' / '+nTot+' partite</div></div>';
   }
   h+='</div>';
+  h+='<div style="margin-top:6px;font-size:11.5px;color:#64748b">La <b style="color:#f59e0b">quota min</b> &egrave; il break-even (1&divide;%). Per un Over live conta i <b>gol che ti servono ancora</b> (linea &minus; gol attuali) e guarda quella card: punta <b>solo</b> se la quota del book &egrave; <b>pi&ugrave; alta</b> della quota min.</div>';
   var lm=_lateMatchData;
   if(lid && lm && String(lm.league_id)===String(lid) && lm.minute===d.minute && lm.seq){
     var seq=lm.seq, maxPos=0, maxNeg=0, curPos=0, curNeg=0;
