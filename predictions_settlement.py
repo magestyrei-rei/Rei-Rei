@@ -612,6 +612,137 @@ def _bet_base_rate(league_id, market, minute, sh, sa):
         return None, 0
     return round(100.0 * won / matched, 1), matched
 
+# === Investi Live: 2-3 mercati migliori per (campionato, fascia 1o gol, minuto attuale, stato) ===
+
+def _invest_bucket(fgm):
+    """Fascia del gol iniziale: 0-5 / 6-10 / 11-16. None se fuori range (dataset
+    early-goal: il 1o gol e' sempre <=16')."""
+    if fgm is None or fgm < 0 or fgm > 16:
+        return None
+    if fgm <= 5:
+        return '0-5'
+    if fgm <= 10:
+        return '6-10'
+    return '11-16'
+
+_INVEST_OVER_THR  = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
+_INVEST_UNDER_THR = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
+_INVEST_MARKETS = [
+    # (market, label, usa_fascia_1o_gol)
+    ('over_1_5', 'Over 1.5', True), ('over_2_5', 'Over 2.5', True),
+    ('over_3_5', 'Over 3.5', True), ('over_4_5', 'Over 4.5', True),
+    ('under_1_5', 'Under 1.5', True), ('under_2_5', 'Under 2.5', True),
+    ('under_3_5', 'Under 3.5', True), ('under_4_5', 'Under 4.5', True),
+    ('btts_si', 'BTTS - Si', True), ('btts_no', 'BTTS - No', True),
+    ("late_goal", "Gol dopo il 75'", False),
+]
+
+def _invest_scan(league_id, minute, sh, sa, bucket):
+    """Un solo passaggio sulle partite della lega: per ogni mercato ancora
+    aperto dato lo stato attuale, calcola base rate storico condizionato su
+    minuto+punteggio (come _bet_base_rate) + fascia del gol iniziale (per
+    over/under/btts). Il gol tardivo (75'+) non usa la fascia: sui dati non
+    e' un segnale li', conta solo lo stato attuale.
+
+    NB: "chi ha segnato il 1o gol" non serve come filtro separato per il BTTS:
+    finche' il BTTS e' ancora aperto (una delle due squadre e' ancora a secco),
+    lo stato attuale lo dice gia' da solo (chi e' avanti ha per forza segnato
+    per primo, dato che l'altra squadra ha 0 gol). E' _invest_market_desc a
+    derivarlo dallo stato per scrivere la spiegazione."""
+    con = _sqlite3.connect(_LOCAL_DB)
+    con.row_factory = _sqlite3.Row
+    rows = con.execute(
+        "SELECT goals_html, goals_text, ft_home, ft_away, first_goal_min "
+        "FROM matches WHERE league_id=?", (int(league_id),)
+    ).fetchall()
+    con.close()
+
+    cur_total = (sh or 0) + (sa or 0)
+    active = []
+    for mk, label, use_bucket in _INVEST_MARKETS:
+        if mk in _INVEST_OVER_THR and cur_total >= _INVEST_OVER_THR[mk]:
+            continue  # soglia gia' superata: mercato deciso
+        if mk in _INVEST_UNDER_THR and cur_total >= _INVEST_UNDER_THR[mk]:
+            continue  # soglia gia' superata: mercato deciso (perso)
+        if mk in ('btts_si', 'btts_no') and (sh or 0) > 0 and (sa or 0) > 0:
+            continue  # entrambe hanno gia' segnato: btts gia' deciso
+        if mk == 'late_goal' and minute >= 90:
+            continue
+        active.append((mk, label, use_bucket))
+    if not active:
+        return []
+
+    late_thr = max(75, minute)
+    cnt = {mk: [0, 0] for mk, *_ in active}  # market -> [matched, won]
+
+    for r in rows:
+        fh, fa = r['ft_home'], r['ft_away']
+        if fh is None or fa is None:
+            continue
+        tl = _bet_timeline(r['goals_html'], r['goals_text'])
+        if any(aw is None for (mn, aw) in tl if mn <= minute):
+            continue  # timeline incompleta (solo goals_text, senza casa/ospite): stato non verificabile
+        hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+        aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+        if hM != (sh or 0) or aM != (sa or 0):
+            continue
+        row_bucket = _invest_bucket(r['first_goal_min'])
+        for mk, label, use_bucket in active:
+            if use_bucket and row_bucket != bucket:
+                continue
+            if mk == 'late_goal':
+                win = any(mn > late_thr for (mn, aw) in tl)
+            else:
+                win = _bet_market_win(mk, fh, fa)
+                if win is None:
+                    continue
+            c = cnt[mk]
+            c[0] += 1
+            if win:
+                c[1] += 1
+
+    label_map = {mk: label for mk, label, *_ in active}
+    out = []
+    for mk, (n, w) in cnt.items():
+        if n == 0:
+            continue
+        br = round(100.0 * w / n, 1)
+        out.append({'market': mk, 'label': label_map[mk], 'base_rate': br, 'n': n})
+    return out
+
+def _invest_market_desc(mk, base_rate, n, bucket, minute, sh, sa):
+    """Spiegazione in linguaggio semplice del perche' del numero mostrato."""
+    state = '%d-%d' % (sh, sa)
+    if mk.startswith('over_') or mk.startswith('under_'):
+        soglia = mk.split('_', 2)[1] + '.' + mk.split('_', 2)[2]
+        verbo = 'supera' if mk.startswith('over_') else 'resta sotto'
+        return ("Partendo dal gol iniziale nella fascia %s' e dallo stato %s al %d', "
+                "lo storico dice che il totale gol finale %s %s nel %s%% dei casi "
+                "(%d partite simili in questo campionato)."
+                % (bucket, state, minute, verbo, soglia, base_rate, n))
+    if mk in ('btts_si', 'btts_no'):
+        si = (mk == 'btts_si')
+        base = 'entrambe le squadre segnano' if si else 'NON entrambe le squadre segnano (almeno una resta a secco)'
+        # Finche' il BTTS e' ancora aperto, chi e' in vantaggio ha per forza segnato
+        # per primo (l'altra squadra ha 0 gol): lo stato attuale lo dice gia' da solo.
+        if sh > 0 and sa == 0:
+            motivo = (" Ha segnato per prima la squadra di casa: negli scenari simili tende a gestire il "
+                       "vantaggio, e l'ospite fatica a recuperare in trasferta, quindi il BTTS storicamente "
+                       "e' piu' raro.")
+        elif sa > 0 and sh == 0:
+            motivo = (" Ha segnato per prima la squadra ospite: negli scenari simili la squadra di casa, sotto "
+                       "in casa propria, spinge per recuperare, e questo storicamente fa salire il BTTS.")
+        else:
+            motivo = ''
+        return ("Dallo stato %s al %d' (gol iniziale in fascia %s'), %s nel %s%% dei casi (%d partite simili).%s"
+                % (state, minute, bucket, base, base_rate, n, motivo))
+    if mk == 'late_goal':
+        return ("Dallo stato %s al %d', arriva almeno un altro gol dopo il 75' nel %s%% dei casi "
+                "(%d partite simili in questo campionato, stesso minuto e risultato). Qui il minuto esatto "
+                "del gol iniziale non incide: conta solo la situazione attuale."
+                % (state, minute, base_rate, n))
+    return ''
+
 def _norm_toks(s):
     """Token normalizzati di un nome squadra (minuscolo, senza accenti, >=3 lettere)."""
     import unicodedata as _ud, re as _re2
@@ -1865,6 +1996,66 @@ def register(app):
             out.sort(key=lambda x: -x['base_rate'])
             return jsonify({'league_id': lid, 'minute': minute, 'state': '%d-%d' % (sh, sa),
                             'total': total, 'markets': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-invest')
+    def api_live_invest():
+        """Investi Live: dato (campionato, minuto del gol iniziale 0-16, minuto
+        attuale, punteggio attuale) sceglie in automatico le 2-3 opzioni di mercato
+        piu' forti e piu' stabili (basate sui dati storici early-goal), con quota
+        equa, quota minima consigliata (+5% di margine) e una spiegazione in
+        linguaggio semplice del perche' (per il BTTS, "chi ha segnato per primo"
+        viene dedotto in automatico dal punteggio inserito)."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            fgm_arg = request.args.get('fgm')
+            fgm = int(fgm_arg) if fgm_arg not in (None, '') else -1
+            bucket = _invest_bucket(fgm)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            if bucket is None:
+                return jsonify({'error': 'il minuto del gol iniziale deve essere tra 0 e 16'}), 400
+            minute_arg = request.args.get('minute')
+            minute = int(minute_arg) if minute_arg not in (None, '') else fgm
+            minute = max(fgm, min(120, minute))
+            sh = int(request.args.get('sh') or 0)
+            sa = int(request.args.get('sa') or 0)
+
+            raw = _invest_scan(lid, minute, sh, sa, bucket)
+            MIN_N_HIDE = 15   # sotto: campione troppo piccolo, mercato nascosto
+            MIN_N_WARN = 30   # sotto: mostrato ma con avviso "campione ridotto"
+            candidates = [m for m in raw if m['n'] >= MIN_N_HIDE]
+            for m in candidates:
+                m['low_sample'] = m['n'] < MIN_N_WARN
+                m['fair_odds'] = round(100.0 / m['base_rate'], 2) if m['base_rate'] > 0 else None
+                m['margin_odds'] = round(m['fair_odds'] * 1.05, 2) if m['fair_odds'] else None
+                m['description'] = _invest_market_desc(
+                    m['market'], m['base_rate'], m['n'], bucket, minute, sh, sa)
+            # Over_X e Under_X (stessa soglia) sono complementari, cosi' come BTTS Si/No:
+            # mostrarli entrambi e' la stessa informazione ripetuta due volte. Tiene solo
+            # il lato piu' forte di ogni coppia prima di scegliere le 2-3 opzioni finali.
+            def _family(mk):
+                if mk.startswith('over_') or mk.startswith('under_'):
+                    return mk.split('_', 1)[1]   # '1_5' / '2_5' / '3_5' / '4_5'
+                if mk in ('btts_si', 'btts_no'):
+                    return 'btts'
+                return mk                        # 'late_goal' resta da solo
+            best_per_family = {}
+            for m in candidates:
+                fam = _family(m['market'])
+                cur = best_per_family.get(fam)
+                if cur is None or abs(m['base_rate'] - 50.0) > abs(cur['base_rate'] - 50.0):
+                    best_per_family[fam] = m
+            deduped = list(best_per_family.values())
+            # ordina per forza del segnale (distanza da 50%), a parita' preferisce campione solido
+            deduped.sort(key=lambda x: (-abs(x['base_rate'] - 50.0), x['low_sample']))
+            top = deduped[:3]
+            return jsonify({
+                'league_id': lid, 'fgm': fgm, 'bucket': bucket, 'minute': minute,
+                'state': '%d-%d' % (sh, sa),
+                'markets': top, 'n_open_markets': len(candidates),
+            })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 

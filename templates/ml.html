@@ -88,6 +88,7 @@
      <div class="tab" data-view="radar">&#x1F6A6; Radar</div>
      <div class="tab" data-view="money">&#x1F4B0; Money</div>
      <div class="tab" data-view="late">&#x23F1;&#xFE0F; Gol tardivi</div>
+     <div class="tab" data-view="invest">&#x1F4A1; Investi Live</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -249,6 +250,25 @@
     </div>
     <div style="font-size:11px;color:#64748b;margin:-4px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> (1-0 = ha segnato la casa, 0-1 = l&#39;ospite).</div>
     <div id="read-board"><div style="color:#64748b;font-size:13px">Scegli una partita live o inserisci i dati e premi Calcola.</div></div>
+  </section>
+
+  <section class="view" id="view-invest">
+    <style>#view-invest select,#view-invest input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #38bdf8;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">
+      &#x1F4A1; <b>Come si usa:</b> scegli il campionato, il <b>minuto in cui &egrave; arrivato il 1&deg; gol</b> (0-16') e il <b>minuto attuale</b> con il <b>punteggio attuale</b> &rarr; il sistema sceglie da solo le <b>2-3 opzioni di mercato</b> pi&ugrave; forti e pi&ugrave; stabili nello storico di quel campionato, con <b>quota equa</b> (il pareggio), <b>quota minima consigliata</b> (+5% di margine) e la spiegazione del perch&eacute;.
+      <br>Investi solo se il bookie offre <b>almeno la quota minima consigliata</b>. Sotto quella soglia il margine non copre il rumore statistico e il margine del bookmaker: meglio lasciar perdere.
+      <br>&#x26A0;&#xFE0F; Se un mercato ha il campione ridotto (n&lt;30) &egrave; segnalato: il numero &egrave; comunque il migliore disponibile, ma con meno partite dietro, quindi meno affidabile.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="inv-league" style="min-width:180px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto 1&deg; gol (0-16)</label><input type="number" id="inv-fgm" value="3" min="0" max="16" style="width:64px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto attuale</label><input type="number" id="inv-minute" value="45" min="0" max="120" style="width:70px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol casa</label><input type="number" id="inv-sh" value="1" min="0" max="20" style="width:56px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol ospite</label><input type="number" id="inv-sa" value="0" min="0" max="20" style="width:56px"></div>
+      <button onclick="loadInvest()" style="padding:7px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola</button>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin:-4px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> al minuto indicato (non chi ha segnato per primo: lo deduciamo da soli quando serve, per il BTTS).</div>
+    <div id="inv-out"><div style="color:#64748b;font-size:13px">Scegli campionato, minuto del 1&deg; gol, minuto attuale e punteggio, poi premi Calcola.</div></div>
   </section>
 
   <section class="view" id="view-seg">
@@ -660,6 +680,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "casi") loadCasiInit();
     if (t.dataset.view === "money") calcMoney();
     if (t.dataset.view === "late") loadLateInit();
+    if (t.dataset.view === "invest") loadInvestInit();
   });
 });
 
@@ -1624,6 +1645,57 @@ function calcEdge(inp, baseRate){
   var edge=baseRate-(100.0/q);
   cell.textContent=(edge>=0?'+':'')+edge.toFixed(1)+'%';
   cell.style.color=edge>=0?'#22c55e':'#f87171';
+}
+
+// === Investi Live (2-3 mercati migliori scelti in automatico) ===
+var _investLeaguesLoaded=false;
+async function loadInvestInit(){
+  if(!_investLeaguesLoaded){
+    _investLeaguesLoaded=true;
+    try{
+      var r=await fetch('/api/leagues');var d=await r.json();
+      var arr=Array.isArray(d)?d:(d.leagues||[]);
+      arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      var sel=document.getElementById('inv-league');
+      arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+    }catch(e){}
+  }
+}
+async function loadInvest(){
+  var el=document.getElementById('inv-out');
+  var lid=document.getElementById('inv-league').value;
+  var fgm=document.getElementById('inv-fgm').value;
+  var mn=document.getElementById('inv-minute').value;
+  var sh=document.getElementById('inv-sh').value||'0';
+  var sa=document.getElementById('inv-sa').value||'0';
+  if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
+  if(fgm===''){el.innerHTML='<div style="color:#64748b;font-size:13px">Inserisci il minuto del 1&deg; gol (0-16).</div>';return;}
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  try{
+    var u='/api/live-invest?league='+lid+'&fgm='+fgm+'&minute='+encodeURIComponent(mn)+'&sh='+sh+'&sa='+sa;
+    var r=await fetch(u);var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    var mk=d.markets||[];
+    if(!mk.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun mercato con campione sufficiente per questa combinazione (prova a cambiare minuto o punteggio).</div>';return;}
+    var h='<div style="margin-bottom:10px;font-size:12.5px;color:#cbd5e1">Fascia 1&deg; gol <b>'+d.bucket+"'</b> &middot; stato <b>"+d.state+'</b> al <b>'+d.minute+"'</b> &middot; "+d.n_open_markets+' mercati ancora aperti, le '+mk.length+' opzioni migliori sotto:</div>';
+    mk.forEach(function(m){
+      var warn = m.low_sample
+        ? ' <span style="color:#f59e0b;font-size:11px">&#x26A0;&#xFE0F; campione ridotto (n='+m.n+')</span>'
+        : ' <span style="color:#64748b;font-size:11px">(n='+m.n+')</span>';
+      h+='<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:10px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
+        +'<div style="font-size:15px;font-weight:700;color:#e2e8f0">'+m.label+warn+'</div>'
+        +'<div style="font-size:20px;font-weight:700;color:#93c5fd">'+m.base_rate+'%</div>'
+        +'</div>'
+        +'<div style="display:flex;gap:18px;margin-top:6px;font-size:13px;color:#cbd5e1;flex-wrap:wrap">'
+        +'<div>Quota equa: <b style="color:#e2e8f0">'+m.fair_odds+'</b></div>'
+        +'<div>Quota minima consigliata (+5%): <b style="color:#22c55e">'+m.margin_odds+'</b></div>'
+        +'</div>'
+        +'<div style="margin-top:8px;font-size:12.5px;color:#94a3b8;line-height:1.5">'+m.description+'</div>'
+        +'</div>';
+    });
+    el.innerHTML=h;
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
 
 // === Scanner nicchie (tutti i campionati) ===
