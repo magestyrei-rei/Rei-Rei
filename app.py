@@ -740,18 +740,54 @@ ml.register(app, query)
 _poll_thread = threading.Thread(target=poll_loop, daemon=True)
 _poll_thread.start()
 
+def _try_reenable_cron():
+    """Prova a riattivare il job notifiche su cron-job.org via API. Attivo SOLO se
+    CRONJOB_API_KEY e CRON_NOTIFY_JOB_ID sono impostati come env var. True se riuscito."""
+    import os as _o, json as _j, urllib.request as _u
+    key = _o.getenv('CRONJOB_API_KEY', '')
+    jid = _o.getenv('CRON_NOTIFY_JOB_ID', '')
+    if not key or not jid:
+        return None   # non configurato
+    try:
+        req = _u.Request('https://api.cron-job.org/jobs/' + jid,
+                         data=_j.dumps({'job': {'enabled': True}}).encode(), method='PATCH')
+        req.add_header('Authorization', 'Bearer ' + key)
+        req.add_header('Content-Type', 'application/json')
+        with _u.urlopen(req, timeout=15) as r:
+            return getattr(r, 'status', 200) in (200, 204)
+    except Exception:
+        return False
+
 # Backup notifiche: se il cron esterno smette di chiamare /api/live-earlygoal-tick
-# (es. cron-job.org disabilita il job dopo dei 503), l'app le invia da sola. Agisce SOLO
-# quando l'ultimo tick e' vecchio (>7 min): con cron sano (ogni 5 min) zero chiamate extra.
+# (es. cron-job.org disabilita il job dopo dei 503), l'app le invia da sola E ti avvisa
+# su Telegram (una volta) provando a riattivare il cron. Agisce SOLO quando l'ultimo tick
+# del cron ESTERNO e' vecchio (>7 min); il backup e' throttlato a ~5 min = niente API extra.
 def _notify_watchdog_loop():
     import time as _t
     import predictions_settlement as _ps
+    alerted = False
+    last_backup = 0.0
     while True:
         _t.sleep(150)
         try:
-            if _t.time() - getattr(_ps, '_LAST_NOTIFY_TS', 0) > 420:
-                res = _ps._refresh_live_eg(send_telegram=True)
-                print("[notify-watchdog] cron esterno fermo -> notifiche inviate dall'app:", res)
+            now = _t.time()
+            cron_down = (now - getattr(_ps, '_LAST_TICK_TS', 0)) > 420
+            if cron_down:
+                if now - last_backup >= 285:          # non piu' spesso del cron esterno (~5 min)
+                    last_backup = now
+                    _ps._refresh_live_eg(send_telegram=True)
+                if not alerted:                        # avvisa UNA volta + prova a riattivare il cron
+                    alerted = True
+                    ok = _try_reenable_cron()
+                    coda = ("Ho riattivato il job in automatico." if ok is True
+                            else ("Riattivazione automatica fallita, riattivalo su cron-job.org." if ok is False
+                                  else "Riattivalo su cron-job.org."))
+                    _ps._send_telegram("⚠️ Cron notifiche FERMO da oltre 7 min. "
+                                       "Backup interno attivo (uso io le API al posto suo). " + coda)
+            else:
+                if alerted:                            # il cron esterno e' ripartito
+                    alerted = False
+                    _ps._send_telegram("✅ Cron notifiche di nuovo attivo. Backup disattivato.")
         except Exception as _e:
             print("[notify-watchdog] err:", str(_e)[:150])
 

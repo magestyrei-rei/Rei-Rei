@@ -853,7 +853,7 @@ def _settle_user_bets(limit=80):
 # ---------- live early-goal (Match in Play + push Telegram, sostituisce n8n) ----------
 
 _LIVE_EG = {'ts': 0, 'matches': []}   # cache in-memory per il tab Match in Play
-_LAST_NOTIFY_TS = 0                    # ultimo tick notifiche (send_telegram=True); lo legge il watchdog in-app
+_LAST_TICK_TS = time.time()           # ultimo tick del cron ESTERNO (/api/live-earlygoal-tick); lo legge il watchdog
 _SCANNER_CACHE = {}   # cache scanner nicchie: (minute, market) -> (ts, full_rows)
 _LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (fisso, cache)
 
@@ -940,9 +940,6 @@ def _refresh_live_eg(send_telegram=False):
     _LIVE_EG['ts'] = int(time.time())
     _LIVE_EG['matches'] = out
     sent = 0
-    if send_telegram:
-        global _LAST_NOTIFY_TS
-        _LAST_NOTIFY_TS = int(time.time())
     if send_telegram and out:
         try:
             _turso_execute(DDL_LIVE_SEEN)
@@ -1596,7 +1593,10 @@ def register(app):
         if not exp or token != exp:
             return jsonify({'error': 'unauthorized'}), 401
         try:
-            return jsonify(_refresh_live_eg(send_telegram=True))
+            res = _refresh_live_eg(send_telegram=True)
+            global _LAST_TICK_TS
+            _LAST_TICK_TS = int(time.time())
+            return jsonify(res)
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
