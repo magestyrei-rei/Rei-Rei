@@ -740,6 +740,24 @@ ml.register(app, query)
 _poll_thread = threading.Thread(target=poll_loop, daemon=True)
 _poll_thread.start()
 
+# Backup notifiche: se il cron esterno smette di chiamare /api/live-earlygoal-tick
+# (es. cron-job.org disabilita il job dopo dei 503), l'app le invia da sola. Agisce SOLO
+# quando l'ultimo tick e' vecchio (>7 min): con cron sano (ogni 5 min) zero chiamate extra.
+def _notify_watchdog_loop():
+    import time as _t
+    import predictions_settlement as _ps
+    while True:
+        _t.sleep(150)
+        try:
+            if _t.time() - getattr(_ps, '_LAST_NOTIFY_TS', 0) > 420:
+                res = _ps._refresh_live_eg(send_telegram=True)
+                print("[notify-watchdog] cron esterno fermo -> notifiche inviate dall'app:", res)
+        except Exception as _e:
+            print("[notify-watchdog] err:", str(_e)[:150])
+
+_notify_thread = threading.Thread(target=_notify_watchdog_loop, daemon=True)
+_notify_thread.start()
+
 
 # ── INGEST ENDPOINT ────────────────────────────────────────────────────────────────────────────
 def _build_goals_html_ingest(goals):

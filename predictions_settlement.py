@@ -853,6 +853,7 @@ def _settle_user_bets(limit=80):
 # ---------- live early-goal (Match in Play + push Telegram, sostituisce n8n) ----------
 
 _LIVE_EG = {'ts': 0, 'matches': []}   # cache in-memory per il tab Match in Play
+_LAST_NOTIFY_TS = 0                    # ultimo tick notifiche (send_telegram=True); lo legge il watchdog in-app
 _SCANNER_CACHE = {}   # cache scanner nicchie: (minute, market) -> (ts, full_rows)
 _LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (fisso, cache)
 
@@ -939,6 +940,9 @@ def _refresh_live_eg(send_telegram=False):
     _LIVE_EG['ts'] = int(time.time())
     _LIVE_EG['matches'] = out
     sent = 0
+    if send_telegram:
+        global _LAST_NOTIFY_TS
+        _LAST_NOTIFY_TS = int(time.time())
     if send_telegram and out:
         try:
             _turso_execute(DDL_LIVE_SEEN)
@@ -2045,11 +2049,15 @@ def register(app):
             for m in candidates:
                 fam = _family(m['market'])
                 cur = best_per_family.get(fam)
-                if cur is None or abs(m['base_rate'] - 50.0) > abs(cur['base_rate'] - 50.0):
+                # Tra due mercati opposti (Over/Under stessa soglia, BTTS Si/No) tieni
+                # SEMPRE il lato con la % piu' alta (l'esito piu' probabile). Prima si usava
+                # la distanza da 50, ma per i complementari e' identica (es. 5,8 e 94,2 -> 44,2
+                # entrambi) e vinceva il primo in lista, cioe' l'Over col 5,8%.
+                if cur is None or m['base_rate'] > cur['base_rate']:
                     best_per_family[fam] = m
             deduped = list(best_per_family.values())
-            # ordina per forza del segnale (distanza da 50%), a parita' preferisce campione solido
-            deduped.sort(key=lambda x: (-abs(x['base_rate'] - 50.0), x['low_sample']))
+            # ordina per probabilita' piu' alta, a parita' preferisce il campione solido
+            deduped.sort(key=lambda x: (-x['base_rate'], x['low_sample']))
             top = deduped[:3]
             return jsonify({
                 'league_id': lid, 'fgm': fgm, 'bucket': bucket, 'minute': minute,
