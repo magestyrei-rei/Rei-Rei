@@ -765,13 +765,19 @@ def _try_reenable_cron():
 def _notify_watchdog_loop():
     import time as _t
     import predictions_settlement as _ps
+    boot = _t.time()
     alerted = False
     last_backup = 0.0
     while True:
         _t.sleep(150)
         try:
             now = _t.time()
-            cron_down = (now - getattr(_ps, '_LAST_TICK_TS', 0)) > 420
+            # Grace period dopo il boot: ogni deploy riavvia l'app e azzera il timer del tick.
+            # Aspetta che il cron esterno abbia avuto ~2 giri (13 min) prima di poter allarmare,
+            # cosi' i deploy non fanno scattare falsi "cron fermo".
+            if now - boot < 780:
+                continue
+            cron_down = (now - getattr(_ps, '_LAST_TICK_TS', 0)) > 600   # 10 min senza tick del cron esterno
             if cron_down:
                 if now - last_backup >= 285:          # non piu' spesso del cron esterno (~5 min)
                     last_backup = now
@@ -782,7 +788,7 @@ def _notify_watchdog_loop():
                     coda = ("Ho riattivato il job in automatico." if ok is True
                             else ("Riattivazione automatica fallita, riattivalo su cron-job.org." if ok is False
                                   else "Riattivalo su cron-job.org."))
-                    _ps._send_telegram("⚠️ Cron notifiche FERMO da oltre 7 min. "
+                    _ps._send_telegram("⚠️ Cron notifiche FERMO da oltre 10 min. "
                                        "Backup interno attivo (uso io le API al posto suo). " + coda)
             else:
                 if alerted:                            # il cron esterno e' ripartito
