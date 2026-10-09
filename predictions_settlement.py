@@ -627,6 +627,8 @@ def _invest_bucket(fgm):
 
 _INVEST_OVER_THR  = {'over_1_5': 2, 'over_2_5': 3, 'over_3_5': 4, 'over_4_5': 5}
 _INVEST_UNDER_THR = {'under_1_5': 2, 'under_2_5': 3, 'under_3_5': 4, 'under_4_5': 5}
+_INVEST_HT_THR    = {'over_1_5_ht': 2, 'over_2_5_ht': 3}   # Over primo tempo (gol entro il 45')
+_INVEST_HT_MARKETS = [('over_1_5_ht', 'Over 1.5 1T'), ('over_2_5_ht', 'Over 2.5 1T')]
 _INVEST_MARKETS = [
     # (market, label, usa_fascia_1o_gol)
     ('over_1_5', 'Over 1.5', True), ('over_2_5', 'Over 2.5', True),
@@ -658,7 +660,7 @@ def _invest_scan(league_id, minute, sh, sa, bucket):
     con.close()
 
     cur_total = (sh or 0) + (sa or 0)
-    active = []
+    active = []  # (mk, label, use_bucket, is_ht)
     for mk, label, use_bucket in _INVEST_MARKETS:
         if mk in _INVEST_OVER_THR and cur_total >= _INVEST_OVER_THR[mk]:
             continue  # soglia gia' superata: mercato deciso
@@ -668,7 +670,13 @@ def _invest_scan(league_id, minute, sh, sa, bucket):
             continue  # entrambe hanno gia' segnato: btts gia' deciso
         if mk == 'late_goal' and minute >= 90:
             continue
-        active.append((mk, label, use_bucket))
+        active.append((mk, label, use_bucket, False))
+    # Over primo tempo: solo PRIMA dell'intervallo e se non gia' decisi dai gol attuali
+    if minute < 45:
+        for mk, label in _INVEST_HT_MARKETS:
+            if cur_total >= _INVEST_HT_THR[mk]:
+                continue  # soglia 1T gia' raggiunta: gia' vinto
+            active.append((mk, label, True, True))
     if not active:
         return []
 
@@ -687,11 +695,14 @@ def _invest_scan(league_id, minute, sh, sa, bucket):
         if hM != (sh or 0) or aM != (sa or 0):
             continue
         row_bucket = _invest_bucket(r['first_goal_min'])
-        for mk, label, use_bucket in active:
+        for mk, label, use_bucket, is_ht in active:
             if use_bucket and row_bucket != bucket:
                 continue
             if mk == 'late_goal':
                 win = any(mn > late_thr for (mn, aw) in tl)
+            elif is_ht:
+                ht_total = sum(1 for (mn, aw) in tl if mn is not None and mn <= 45)
+                win = ht_total >= _INVEST_HT_THR[mk]
             else:
                 win = _bet_market_win(mk, fh, fa)
                 if win is None:
@@ -702,17 +713,24 @@ def _invest_scan(league_id, minute, sh, sa, bucket):
                 c[1] += 1
 
     label_map = {mk: label for mk, label, *_ in active}
+    ht_set = {mk for mk, label, use_bucket, is_ht in active if is_ht}
     out = []
     for mk, (n, w) in cnt.items():
         if n == 0:
             continue
         br = round(100.0 * w / n, 1)
-        out.append({'market': mk, 'label': label_map[mk], 'base_rate': br, 'n': n})
+        out.append({'market': mk, 'label': label_map[mk], 'base_rate': br, 'n': n, 'ht': mk in ht_set})
     return out
 
 def _invest_market_desc(mk, base_rate, n, bucket, minute, sh, sa):
     """Spiegazione in linguaggio semplice del perche' del numero mostrato."""
     state = '%d-%d' % (sh, sa)
+    if mk in ('over_1_5_ht', 'over_2_5_ht'):
+        soglia = '1.5' if mk == 'over_1_5_ht' else '2.5'
+        return ("Dal gol iniziale in fascia %s' e dallo stato %s al %d', nel PRIMO TEMPO il totale gol "
+                "supera %s nel %s%% dei casi (%d partite simili). Vale solo prima dell'intervallo: prima "
+                "arriva il 1o gol, piu' questa sale."
+                % (bucket, state, minute, soglia, base_rate, n))
     if mk.startswith('over_') or mk.startswith('under_'):
         soglia = mk.split('_', 2)[1] + '.' + mk.split('_', 2)[2]
         verbo = 'supera' if mk.startswith('over_') else 'resta sotto'
@@ -2029,7 +2047,8 @@ def register(app):
             raw = _invest_scan(lid, minute, sh, sa, bucket)
             MIN_N_HIDE = 15   # sotto: campione troppo piccolo, mercato nascosto
             MIN_N_WARN = 30   # sotto: mostrato ma con avviso "campione ridotto"
-            candidates = [m for m in raw if m['n'] >= MIN_N_HIDE]
+            ht_raw = [m for m in raw if m.get('ht')]
+            candidates = [m for m in raw if not m.get('ht') and m['n'] >= MIN_N_HIDE]
             for m in candidates:
                 m['low_sample'] = m['n'] < MIN_N_WARN
                 m['fair_odds'] = round(100.0 / m['base_rate'], 2) if m['base_rate'] > 0 else None
@@ -2059,10 +2078,23 @@ def register(app):
             # ordina per probabilita' piu' alta, a parita' preferisce il campione solido
             deduped.sort(key=lambda x: (-x['base_rate'], x['low_sample']))
             top = deduped[:3]
+            # Over primo tempo: blocco a parte (entrambi, non in competizione col top-3);
+            # sono presenti solo se minuto < 45 (li aggiunge _invest_scan).
+            ht_markets = []
+            for m in ht_raw:
+                if m['n'] < MIN_N_HIDE:
+                    continue
+                m['low_sample'] = m['n'] < MIN_N_WARN
+                m['fair_odds'] = round(100.0 / m['base_rate'], 2) if m['base_rate'] > 0 else None
+                m['margin_odds'] = round(m['fair_odds'] * 1.05, 2) if m['fair_odds'] else None
+                m['description'] = _invest_market_desc(
+                    m['market'], m['base_rate'], m['n'], bucket, minute, sh, sa)
+                ht_markets.append(m)
+            ht_markets.sort(key=lambda x: -x['base_rate'])
             return jsonify({
                 'league_id': lid, 'fgm': fgm, 'bucket': bucket, 'minute': minute,
                 'state': '%d-%d' % (sh, sa),
-                'markets': top, 'n_open_markets': len(candidates),
+                'markets': top, 'ht_markets': ht_markets, 'n_open_markets': len(candidates),
             })
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500

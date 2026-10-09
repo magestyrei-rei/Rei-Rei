@@ -1675,25 +1675,31 @@ async function loadInvest(){
     var u='/api/live-invest?league='+lid+'&fgm='+fgm+'&minute='+encodeURIComponent(mn)+'&sh='+sh+'&sa='+sa;
     var r=await fetch(u);var d=await r.json();
     if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
-    var mk=d.markets||[];
-    if(!mk.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun mercato con campione sufficiente per questa combinazione (prova a cambiare minuto o punteggio).</div>';return;}
-    var h='<div style="margin-bottom:10px;font-size:12.5px;color:#cbd5e1">Fascia 1&deg; gol <b>'+d.bucket+"'</b> &middot; stato <b>"+d.state+'</b> al <b>'+d.minute+"'</b> &middot; "+d.n_open_markets+' mercati ancora aperti, le '+mk.length+' opzioni migliori sotto:</div>';
-    mk.forEach(function(m){
+    var mk=d.markets||[], htm=d.ht_markets||[];
+    if(!mk.length && !htm.length){el.innerHTML='<div style="color:#64748b;font-size:13px">Nessun mercato con campione sufficiente per questa combinazione (prova a cambiare minuto o punteggio).</div>';return;}
+    var h='<div style="margin-bottom:10px;font-size:12.5px;color:#cbd5e1">Fascia 1&deg; gol <b>'+d.bucket+"'</b> &middot; stato <b>"+d.state+'</b> al <b>'+d.minute+"'</b> &middot; "+d.n_open_markets+' mercati ancora aperti'+(mk.length?(', le '+mk.length+' opzioni migliori sotto:'):':')+'</div>';
+    function _invCard(m, accent){
       var warn = m.low_sample
         ? ' <span style="color:#f59e0b;font-size:11px">&#x26A0;&#xFE0F; campione ridotto (n='+m.n+')</span>'
         : ' <span style="color:#64748b;font-size:11px">(n='+m.n+')</span>';
-      h+='<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:10px">'
+      var fo=(m.fair_odds==null)?'&mdash;':m.fair_odds, mo=(m.margin_odds==null)?'&mdash;':m.margin_odds;
+      return '<div style="background:#0f172a;border:1px solid #1e293b;'+(accent?'border-left:3px solid #38bdf8;':'')+'border-radius:8px;padding:12px 14px;margin-bottom:10px">'
         +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
         +'<div style="font-size:15px;font-weight:700;color:#e2e8f0">'+m.label+warn+'</div>'
         +'<div style="font-size:20px;font-weight:700;color:#93c5fd">'+m.base_rate+'%</div>'
         +'</div>'
         +'<div style="display:flex;gap:18px;margin-top:6px;font-size:13px;color:#cbd5e1;flex-wrap:wrap">'
-        +'<div>Quota equa: <b style="color:#e2e8f0">'+m.fair_odds+'</b></div>'
-        +'<div>Quota minima consigliata (+5%): <b style="color:#22c55e">'+m.margin_odds+'</b></div>'
+        +'<div>Quota equa: <b style="color:#e2e8f0">'+fo+'</b></div>'
+        +'<div>Quota minima consigliata (+5%): <b style="color:#22c55e">'+mo+'</b></div>'
         +'</div>'
         +'<div style="margin-top:8px;font-size:12.5px;color:#94a3b8;line-height:1.5">'+m.description+'</div>'
         +'</div>';
-    });
+    }
+    mk.forEach(function(m){ h+=_invCard(m,false); });
+    if(htm.length){
+      h+='<div style="margin:16px 0 8px;font-weight:700;color:#e2e8f0;border-top:2px solid #1e293b;padding-top:12px">&#x23F1;&#xFE0F; Primo tempo &middot; Over 1T (visibile solo prima del 45&#39;)</div>';
+      htm.forEach(function(m){ h+=_invCard(m,true); });
+    }
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
 }
