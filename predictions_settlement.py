@@ -761,6 +761,249 @@ def _invest_market_desc(mk, base_rate, n, bucket, minute, sh, sa):
                 % (state, minute, base_rate, n))
     return ''
 
+
+# === Analisi Live: board consolidata (mercati + 1X2 + rimonte) per input manuale ===
+
+def _live_analysis_build(lid, minute, sh, sa, fgm, first=None):
+    """Board consolidata per il tab Analisi Live. Dato (campionato, minuto del 1o gol
+    0-16, minuto attuale, punteggio, chi ha segnato per primo) mette insieme in un solo
+    oggetto, SENZA inventare nulla (tutto storico):
+      - mercati over/under/btts/gol-tardivo condizionati sulla fascia del 1o gol (via _invest_scan),
+      - gli Over primo tempo (se minuto < 45),
+      - l'1X2 condizionato su stato + minuto (via _bet_base_rate),
+      - il contesto rimonte del campionato (come finisce chi segna per primo),
+      - il numero di partite storiche nello stato attuale + una lista di esempi."""
+    bucket = _invest_bucket(fgm)
+    MIN_N_HIDE, MIN_N_WARN = 15, 30
+
+    # --- mercati over/under/btts/late + HT (condizionati sulla fascia del 1o gol) ---
+    raw = _invest_scan(lid, minute, sh, sa, bucket)
+    ht_raw = [m for m in raw if m.get('ht')]
+    cands = [m for m in raw if not m.get('ht') and m['n'] >= MIN_N_HIDE]
+
+    def _finish(m):
+        m['low_sample'] = m['n'] < MIN_N_WARN
+        m['fair_odds'] = round(100.0 / m['base_rate'], 2) if m['base_rate'] > 0 else None
+        m['margin_odds'] = round(m['fair_odds'] * 1.05, 2) if m['fair_odds'] else None
+        m['description'] = _invest_market_desc(m['market'], m['base_rate'], m['n'], bucket, minute, sh, sa)
+        return m
+
+    def _family(mk):
+        if mk.startswith('over_') or mk.startswith('under_'):
+            return mk.split('_', 1)[1]
+        if mk in ('btts_si', 'btts_no'):
+            return 'btts'
+        return mk
+
+    best = {}
+    for m in cands:
+        _finish(m)
+        fam = _family(m['market'])
+        cur = best.get(fam)
+        if cur is None or m['base_rate'] > cur['base_rate']:
+            best[fam] = m
+    markets = sorted(best.values(), key=lambda x: (-x['base_rate'], x['low_sample']))
+
+    ht_markets = []
+    for m in ht_raw:
+        if m['n'] < MIN_N_HIDE:
+            continue
+        _finish(m)
+        ht_markets.append(m)
+    ht_markets.sort(key=lambda x: -x['base_rate'])
+
+    # --- 1X2 condizionato su stato + minuto ---
+    x12 = []
+    for mk, label in (('1', '1 (Casa)'), ('X', 'X (Pareggio)'), ('2', '2 (Ospite)')):
+        br, n = _bet_base_rate(lid, mk, minute, sh, sa)
+        if not n:
+            continue
+        x12.append({'market': mk, 'label': label, 'base_rate': br, 'n': n,
+                    'low_sample': n < 50,
+                    'fair_odds': (round(100.0 / br, 2) if br and br > 0 else None),
+                    'margin_odds': (round(100.0 / br * 1.05, 2) if br and br > 0 else None)})
+
+    # --- contesto rimonte del campionato + campione nello stato + esempi (un solo scan) ---
+    rc = {'home': [0, 0, 0], 'away': [0, 0, 0]}   # [vinte, pari, perse] di chi segna per primo
+    n_state = 0
+    samples = []
+    try:
+        con = _ro_con()
+        rows = con.execute(
+            "SELECT date_str, home_team, away_team, ft_home, ft_away, goals_html, goals_text "
+            "FROM matches WHERE league_id=? ORDER BY sort_date DESC, time_str DESC", (int(lid),)
+        ).fetchall()
+        con.close()
+    except Exception:
+        rows = []
+    for r in rows:
+        fh, fa = r['ft_home'], r['ft_away']
+        if fh is None or fa is None:
+            continue
+        tl = _bet_timeline(r['goals_html'], r['goals_text'])
+        if tl and tl[0][1] is not None:
+            fgt = 'away' if tl[0][1] else 'home'
+            if fh == fa:
+                rc[fgt][1] += 1
+            elif (fh > fa) == (fgt == 'home'):
+                rc[fgt][0] += 1
+            else:
+                rc[fgt][2] += 1
+        if any(aw is None for (mn, aw) in tl if mn <= minute):
+            continue
+        hM = sum(1 for (mn, aw) in tl if mn <= minute and aw is False)
+        aM = sum(1 for (mn, aw) in tl if mn <= minute and aw is True)
+        if hM != (sh or 0) or aM != (sa or 0):
+            continue
+        n_state += 1
+        if len(samples) < 20:
+            fgm_r = tl[0][0] if tl else None
+            fgt_r = (('away' if tl[0][1] else 'home') if (tl and tl[0][1] is not None) else None)
+            samples.append({'date': r['date_str'], 'home': r['home_team'], 'away': r['away_team'],
+                            'final': '%d-%d' % (fh, fa), 'fg_min': fgm_r, 'fg_team': fgt_r})
+
+    first_team = first if first in ('home', 'away') else None
+    if first_team is None:
+        if (sh or 0) > 0 and (sa or 0) == 0:
+            first_team = 'home'
+        elif (sa or 0) > 0 and (sh or 0) == 0:
+            first_team = 'away'
+    rimonte = None
+    if first_team:
+        w, d, l = rc[first_team]
+        tot = w + d + l
+        if tot:
+            rimonte = {'first': first_team, 'n': tot,
+                       'win': round(100.0 * w / tot, 1),
+                       'draw': round(100.0 * d / tot, 1),
+                       'loss': round(100.0 * l / tot, 1)}
+
+    return {
+        'league_id': lid, 'league': _league_name(lid), 'fgm': fgm, 'bucket': bucket,
+        'minute': minute, 'state': '%d-%d' % (sh or 0, sa or 0),
+        'markets': markets, 'ht_markets': ht_markets, 'x12': x12,
+        'rimonte': rimonte, 'first_team': first_team,
+        'n_state': n_state, 'n_open_markets': len(cands), 'samples': samples,
+    }
+
+
+def _live_analysis_data_block(board, quotes, capitale):
+    """Blocco-dati testuale (solo i numeri gia' calcolati nella board) da passare
+    all'LLM. Se sono presenti le quote bookie, calcola e mostra anche l'edge."""
+    def _q(mk):
+        try:
+            v = float((quotes or {}).get(mk))
+            return v if v > 1 else None
+        except Exception:
+            return None
+
+    def _line(m, suffix=''):
+        q = _q(m['market'])
+        extra = ''
+        if q:
+            edge = m['base_rate'] - 100.0 / q
+            extra = ' | quota bookie %.2f -> edge %+.1f%%' % (q, edge)
+        warn = ', campione ridotto' if m.get('low_sample') else ''
+        return ("- %s%s: %.1f%% (quota equa %s, n=%d%s)%s"
+                % (m['label'], suffix, m['base_rate'], m.get('fair_odds') or '-', m['n'], warn, extra))
+
+    lg = board.get('league') or ('campionato #%s' % board.get('league_id'))
+    L = []
+    L.append("Partita di %s. Punteggio attuale %s al %d'. Primo gol al %d' (fascia %s')."
+             % (lg, board['state'], board['minute'], board['fgm'], board['bucket']))
+    ft = board.get('first_team')
+    if ft:
+        L.append("Ha segnato per primo: %s." % ('la squadra di CASA' if ft == 'home' else "la squadra OSPITE"))
+    L.append("Partite storiche in questo stato a questo minuto: n=%d." % board.get('n_state', 0))
+    if board.get('markets'):
+        L.append("")
+        L.append("MERCATI (base rate storico condizionato su fascia 1o gol + stato + minuto; quota equa = break-even):")
+        for m in board['markets']:
+            L.append(_line(m))
+    if board.get('ht_markets'):
+        for m in board['ht_markets']:
+            L.append(_line(m, suffix=' (primo tempo)'))
+    if board.get('x12'):
+        L.append("")
+        L.append("ESITO FINALE 1X2 (condizionato su stato + minuto):")
+        for m in board['x12']:
+            L.append(_line(m))
+    rb = board.get('rimonte')
+    if rb:
+        L.append("")
+        L.append("CONTESTO RIMONTE del campionato (come finisce chi ha segnato per primo, qui %s): "
+                 "vince %.1f%%, pareggia %.1f%%, perde %.1f%% (n=%d)."
+                 % ('la CASA' if rb['first'] == 'home' else "l'OSPITE",
+                    rb['win'], rb['draw'], rb['loss'], rb['n']))
+    if capitale:
+        L.append("")
+        L.append("Capitale disponibile indicato dall'utente: %s. Se consigli una puntata, usa un "
+                 "frazionamento prudente (1/4 di Kelly) e indica l'importo in euro." % capitale)
+    return "\n".join(L)
+
+
+_LLM_SYSTEM = (
+    "Sei un analista di scommesse calcistiche esperto, prudente e onesto. "
+    "Analizza USANDO SOLO i numeri forniti nei dati: NON inventare statistiche, quote o "
+    "percentuali che non sono presenti. Scrivi in italiano, tono pratico e diretto (come un "
+    "amico esperto), al massimo ~200 parole. Struttura cosi':\n"
+    "1) Lettura della situazione in 1-2 frasi.\n"
+    "2) Dove c'e' VALORE adesso (mercati con edge positivo e campione solido n>=50) e perche'.\n"
+    "3) Cosa EVITARE (edge negativo, campione piccolo, o quota sotto la quota equa).\n"
+    "4) Se e' indicato un capitale, una puntata suggerita prudente (1/4 di Kelly) con importo.\n"
+    "5) Una riga finale di cautela: sono stime storiche, i book sanno cose che lo storico non "
+    "sa (infortuni, formazioni), gioca responsabilmente.\n"
+    "Regole: diffida degli edge molto alti (>10%) o con n basso; un edge realistico e' +2/6%. "
+    "Se nessun mercato ha valore chiaro, dillo e consiglia di passare."
+)
+
+
+def _llm_analysis(board, quotes, capitale):
+    """Chiama l'API Anthropic (via urllib, come _send_telegram: niente dipendenze extra).
+    Modello di default Sonnet, sovrascrivibile con la env LLM_MODEL. Ritorna (result, err)."""
+    api_key = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return None, ("Analisi a parole non configurata: imposta ANTHROPIC_API_KEY su Render "
+                      "(vedi istruzioni). La board numerica qui sopra funziona comunque.")
+    model = os.getenv('LLM_MODEL', 'claude-sonnet-5-5')
+    import urllib.request as _u
+    import urllib.error as _ue
+    body = json.dumps({
+        'model': model,
+        'max_tokens': 900,
+        'system': _LLM_SYSTEM,
+        'messages': [{'role': 'user', 'content': _live_analysis_data_block(board, quotes, capitale)}],
+    }).encode('utf-8')
+    req = _u.Request('https://api.anthropic.com/v1/messages', data=body, headers={
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+    })
+    try:
+        with _u.urlopen(req, timeout=45) as r:
+            data = json.loads(r.read().decode('utf-8'))
+    except _ue.HTTPError as e:
+        try:
+            det = json.loads(e.read().decode('utf-8', 'replace'))
+            msg = (det.get('error') or {}).get('message') or (str(det)[:200])
+        except Exception:
+            msg = 'HTTP %s' % e.code
+        hint = ''
+        if e.code in (401, 403):
+            hint = ' (chiave non valida o senza credito: controlla ANTHROPIC_API_KEY e il saldo crediti su console.anthropic.com)'
+        elif e.code == 400 and 'model' in (msg or '').lower():
+            hint = " (modello non riconosciuto: imposta la env LLM_MODEL su un modello valido, es. claude-haiku-5-5)"
+        return None, ('Errore API Anthropic (%s): %s%s' % (e.code, msg[:200], hint))
+    except Exception as e:
+        return None, ('Errore nella chiamata all\'analisi a parole: %s' % (str(e)[:200]))
+    text = ''.join(b.get('text', '') for b in (data.get('content') or []) if b.get('type') == 'text').strip()
+    if not text:
+        return None, 'La risposta dell\'analisi a parole e\' arrivata vuota, riprova.'
+    usage = data.get('usage') or {}
+    return {'text': text, 'model': data.get('model', model),
+            'in_tokens': usage.get('input_tokens'), 'out_tokens': usage.get('output_tokens')}, None
+
+
 def _norm_toks(s):
     """Token normalizzati di un nome squadra (minuscolo, senza accenti, >=3 lettere)."""
     import unicodedata as _ud, re as _re2
@@ -2018,6 +2261,63 @@ def register(app):
             out.sort(key=lambda x: -x['base_rate'])
             return jsonify({'league_id': lid, 'minute': minute, 'state': '%d-%d' % (sh, sa),
                             'total': total, 'markets': out})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-analysis')
+    def api_live_analysis():
+        """Analisi Live (board consolidata, GRATIS): dato campionato + punteggio +
+        minuto del 1o gol + minuto attuale, restituisce mercati (condizionati sulla
+        fascia del 1o gol) + 1X2 + contesto rimonte, con quota equa e quota minima."""
+        try:
+            lid = int(request.args.get('league') or 0)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            fgm_arg = request.args.get('fgm')
+            fgm = int(fgm_arg) if fgm_arg not in (None, '') else -1
+            if _invest_bucket(fgm) is None:
+                return jsonify({'error': 'il minuto del 1o gol deve essere tra 0 e 16'}), 400
+            minute_arg = request.args.get('minute')
+            minute = int(minute_arg) if minute_arg not in (None, '') else fgm
+            minute = max(fgm, min(120, minute))
+            sh = int(request.args.get('sh') or 0)
+            sa = int(request.args.get('sa') or 0)
+            first = (request.args.get('first') or '').strip().lower()
+            first = first if first in ('home', 'away') else None
+            return jsonify(_live_analysis_build(lid, minute, sh, sa, fgm, first))
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/live-analysis-llm', methods=['POST'])
+    def api_live_analysis_llm():
+        """Analisi 'a parole' con LLM Anthropic (Sonnet di default, o la env LLM_MODEL).
+        Riusa la stessa board e aggiunge il testo. Le quote bookie (facoltative) e il
+        capitale arrivano nel body JSON per il calcolo di edge / puntata. Se manca
+        ANTHROPIC_API_KEY ritorna un messaggio chiaro (la board gratis resta valida)."""
+        try:
+            p = request.get_json(silent=True) or {}
+            lid = int(p.get('league') or 0)
+            if not lid:
+                return jsonify({'error': 'parametro league richiesto'}), 400
+            fgm_arg = p.get('fgm')
+            fgm = int(fgm_arg) if fgm_arg not in (None, '') else -1
+            if _invest_bucket(fgm) is None:
+                return jsonify({'error': 'il minuto del 1o gol deve essere tra 0 e 16'}), 400
+            minute_arg = p.get('minute')
+            minute = int(minute_arg) if minute_arg not in (None, '') else fgm
+            minute = max(fgm, min(120, minute))
+            sh = int(p.get('sh') or 0)
+            sa = int(p.get('sa') or 0)
+            first = p.get('first')
+            first = first.strip().lower() if isinstance(first, str) else ''
+            first = first if first in ('home', 'away') else None
+            quotes = p.get('quotes') if isinstance(p.get('quotes'), dict) else {}
+            capitale = (str(p.get('capitale')).strip() if p.get('capitale') not in (None, '') else '')
+            board = _live_analysis_build(lid, minute, sh, sa, fgm, first)
+            result, err = _llm_analysis(board, quotes, capitale)
+            if err:
+                return jsonify({'error': err})
+            return jsonify({'analysis': result})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 

@@ -89,6 +89,7 @@
      <div class="tab" data-view="money">&#x1F4B0; Money</div>
      <div class="tab" data-view="late">&#x23F1;&#xFE0F; Gol tardivi</div>
      <div class="tab" data-view="invest">&#x1F4A1; Investi Live</div>
+     <div class="tab" data-view="analisi">&#x1F9E0; Analisi Live</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -269,6 +270,43 @@
     </div>
     <div style="font-size:11px;color:#64748b;margin:-4px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> al minuto indicato (non chi ha segnato per primo: lo deduciamo da soli quando serve, per il BTTS).</div>
     <div id="inv-out"><div style="color:#64748b;font-size:13px">Scegli campionato, minuto del 1&deg; gol, minuto attuale e punteggio, poi premi Calcola.</div></div>
+  </section>
+
+  <section class="view" id="view-analisi">
+    <style>#view-analisi select,#view-analisi input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}</style>
+    <div style="background:#0f2030;border:1px solid #1e3a5f;border-left:3px solid #a855f7;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#cbd5e1;line-height:1.65">
+      &#x1F9E0; <b>Analisi Live &mdash; come si usa:</b>
+      <ol style="margin:6px 0 8px 18px;padding:0">
+        <li><b>Da partita live</b>: scegli la partita dal men&ugrave; e campionato/minuto/punteggio si compilano da soli (oppure inserisci tutto a mano).</li>
+        <li>Imposta il <b>minuto del 1&deg; gol</b> (0-16'), il <b>minuto attuale</b> e il <b>punteggio attuale</b>. <b>Chi ha segnato per primo</b> lo deduco dal punteggio (1-0 = casa, 0-1 = ospite); se &egrave; in parit&agrave; scegli tu.</li>
+        <li>Premi <b>Calcola analisi</b>: ottieni la board con mercati (condizionati sul minuto del 1&deg; gol), <b>1X2</b> e <b>contesto rimonte</b>, con <b>quota equa</b>, <b>quota minima</b> e <b>n</b>.</li>
+        <li>Digita le <b>quote del bookie</b> &rarr; vedi <b>edge</b> ed esito (&#x2705;/&#x274C;). Se metti il <b>capitale</b>, calcolo la puntata consigliata (1/4 di Kelly).</li>
+        <li>Per un parere discorsivo premi <b>&#x1F9E0; Analisi a parole</b>: l&#39;AI (Sonnet) legge gli stessi numeri e ti d&agrave; la sua lettura (serve la chiave API su Render).</li>
+      </ol>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Da partita live (1 click)</label>
+        <select id="an-live" onchange="pickAnalisiLive()" style="min-width:280px"><option value="">&mdash; scegli una partita live &mdash;</option></select></div>
+      <button onclick="loadAnalisiLive()" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:6px;cursor:pointer">&#x21BB; aggiorna live</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="an-league" style="min-width:170px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto 1&deg; gol (0-16)</label><input type="number" id="an-fgm" value="7" min="0" max="16" style="width:70px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto attuale</label><input type="number" id="an-minute" value="65" min="0" max="120" style="width:70px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol casa</label><input type="number" id="an-sh" value="0" min="0" max="20" style="width:56px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Gol ospite</label><input type="number" id="an-sa" value="1" min="0" max="20" style="width:56px"></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">1&deg; gol di</label><select id="an-first">
+        <option value="">Auto (dal punteggio)</option><option value="home">Casa</option><option value="away">Ospite</option></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Capitale &euro; (facolt.)</label><input type="number" id="an-cap" value="" min="0" step="1" placeholder="es. 50" style="width:90px" oninput="recalcAnalisiStakes()"></div>
+      <button onclick="loadAnalisi()" style="padding:7px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">Calcola analisi</button>
+    </div>
+    <div style="font-size:11px;color:#64748b;margin:-2px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> (1-0 = ha segnato la casa, 0-1 = l&#39;ospite). Il 1&deg; gol &egrave; sempre entro il 16&#39; (dataset early-goal).</div>
+    <div id="analisi-board"><div style="color:#64748b;font-size:13px">Scegli una partita live o inserisci i dati e premi <b>Calcola analisi</b>.</div></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button onclick="askAnalisiWords()" style="padding:9px 18px;background:#a855f7;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">&#x1F9E0; Analisi a parole (AI)</button>
+      <span style="font-size:11px;color:#64748b">Usa i numeri della board + le quote che hai digitato. Costo per analisi: pochi centesimi (modello Sonnet).</span>
+    </div>
+    <div id="an-llm-box" style="display:none;margin-top:12px;background:#140f24;border:1px solid #3b2d5f;border-left:3px solid #a855f7;border-radius:8px;padding:14px 16px"></div>
   </section>
 
   <section class="view" id="view-seg">
@@ -681,6 +719,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "money") calcMoney();
     if (t.dataset.view === "late") loadLateInit();
     if (t.dataset.view === "invest") loadInvestInit();
+    if (t.dataset.view === "analisi") loadAnalisiInit();
   });
 });
 
@@ -1702,6 +1741,179 @@ async function loadInvest(){
     }
     el.innerHTML=h;
   }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+
+// === Analisi Live (board consolidata + analisi a parole AI) ===
+var _analisiLeaguesLoaded=false;
+async function loadAnalisiInit(){
+  if(!_analisiLeaguesLoaded){
+    _analisiLeaguesLoaded=true;
+    try{
+      var r=await fetch('/api/leagues');var d=await r.json();
+      var arr=Array.isArray(d)?d:(d.leagues||[]);
+      arr.sort(function(a,b){return (a.name||'').localeCompare(b.name||'');});
+      var sel=document.getElementById('an-league');
+      arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
+    }catch(e){}
+  }
+  loadAnalisiLive();
+}
+async function loadAnalisiLive(){
+  var sel=document.getElementById('an-live');
+  try{
+    var r=await fetch('/api/live-earlygoal');var d=await r.json();
+    var ms=d.matches||[];
+    sel.innerHTML='<option value="">&mdash; partite live ('+ms.length+') &mdash;</option>';
+    ms.forEach(function(m,i){
+      var o=document.createElement('option');
+      o.value=i;
+      o.textContent=(m.league||'')+': '+m.home+' vs '+m.away+'  '+m.score+'  ('+(m.minute||'?')+"')";
+      o.dataset.lid=m.league_id; o.dataset.min=m.minute||''; o.dataset.score=m.score||'';
+      o.dataset.fgm=(m.first_goal_min!=null?m.first_goal_min:'');
+      sel.appendChild(o);
+    });
+  }catch(e){}
+}
+function pickAnalisiLive(){
+  var sel=document.getElementById('an-live');
+  var opt=sel.options[sel.selectedIndex];
+  if(!opt||!opt.value){return;}
+  var lid=opt.dataset.lid, mn=opt.dataset.min, sc=(opt.dataset.score||'').split('-');
+  if(lid){document.getElementById('an-league').value=lid;}
+  if(mn){document.getElementById('an-minute').value=mn;}
+  if(opt.dataset.fgm!==''){document.getElementById('an-fgm').value=opt.dataset.fgm;}
+  if(sc.length===2){
+    document.getElementById('an-sh').value=sc[0];
+    document.getElementById('an-sa').value=sc[1];
+    var hh=parseInt(sc[0],10), aa=parseInt(sc[1],10);
+    document.getElementById('an-first').value=(hh>aa?'home':(aa>hh?'away':''));
+  }
+  loadAnalisi();
+}
+async function loadAnalisi(){
+  var el=document.getElementById('analisi-board');
+  var lid=document.getElementById('an-league').value;
+  if(!lid){el.innerHTML='<div style="color:#64748b;font-size:13px">Seleziona un campionato.</div>';return;}
+  var fgm=document.getElementById('an-fgm').value;
+  if(fgm===''){el.innerHTML='<div style="color:#64748b;font-size:13px">Inserisci il minuto del 1&deg; gol (0-16).</div>';return;}
+  var mn=document.getElementById('an-minute').value||fgm;
+  var sh=document.getElementById('an-sh').value||'0';
+  var sa=document.getElementById('an-sa').value||'0';
+  var first=document.getElementById('an-first').value||'';
+  el.innerHTML='<div style="color:#94a3b8;padding:10px">Calcolo...</div>';
+  document.getElementById('an-llm-box').style.display='none';
+  try{
+    var u='/api/live-analysis?league='+lid+'&fgm='+fgm+'&minute='+encodeURIComponent(mn)+'&sh='+sh+'&sa='+sa+(first?('&first='+first):'');
+    var r=await fetch(u);var d=await r.json();
+    if(d.error){el.innerHTML='<div style="color:#f87171">'+d.error+'</div>';return;}
+    renderAnalisiBoard(d);
+  }catch(e){el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>';}
+}
+function _anTable(title, arr){
+  var head='<div style="margin:12px 0 6px;font-weight:700;color:#e2e8f0">'+title+'</div>';
+  var t='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#4c1d95;color:#fff">'
+    +'<th style="padding:7px 10px;text-align:left">Mercato</th>'
+    +'<th style="padding:7px 8px;text-align:center">Base rate</th>'
+    +'<th style="padding:7px 8px;text-align:center">Quota equa</th>'
+    +'<th style="padding:7px 8px;text-align:center">Quota min</th>'
+    +'<th style="padding:7px 8px;text-align:center">n</th>'
+    +'<th style="padding:7px 8px;text-align:center">Quota bookie</th>'
+    +'<th style="padding:7px 8px;text-align:center">Edge</th>'
+    +'<th style="padding:7px 8px;text-align:center">Esito</th></tr></thead><tbody>';
+  arr.forEach(function(s,i){
+    var weak=s.n<50;
+    var bg=i%2?'background:#0f172a;':'';
+    var fo=(s.fair_odds==null?'-':s.fair_odds), mo=(s.margin_odds==null?'-':s.margin_odds);
+    t+='<tr style="border-top:1px solid #1e293b;'+bg+'">'
+      +'<td style="padding:6px 10px;font-weight:600;color:#e2e8f0">'+s.label+(weak?' <span style="color:#f59e0b;font-size:11px">&#x26A0;</span>':'')+'</td>'
+      +'<td style="padding:6px 8px;text-align:center;font-weight:700;color:#c4b5fd">'+s.base_rate+'%</td>'
+      +'<td style="padding:6px 8px;text-align:center">'+fo+'</td>'
+      +'<td style="padding:6px 8px;text-align:center;color:#22c55e;font-weight:600">'+mo+'</td>'
+      +'<td style="padding:6px 8px;text-align:center;color:#94a3b8">'+s.n+'</td>'
+      +'<td style="padding:6px 8px;text-align:center"><input type="number" step="0.01" min="1" data-mk="'+s.market+'" data-base="'+s.base_rate+'" data-n="'+s.n+'" oninput="calcAnalisiEdge(this)" placeholder="es. 1.80" style="width:72px"></td>'
+      +'<td style="padding:6px 8px;text-align:center;font-weight:700" class="an-edge">-</td>'
+      +'<td style="padding:6px 8px;text-align:center;font-weight:600;font-size:12px" class="an-verdict">-</td></tr>';
+  });
+  t+='</tbody></table></div>';
+  return head+t;
+}
+function renderAnalisiBoard(d){
+  var el=document.getElementById('analisi-board');
+  var h='<div style="margin-bottom:8px;font-size:12.5px;color:#cbd5e1">'
+    +(d.league?('<b>'+d.league+'</b> &middot; '):'')
+    +'fascia 1&deg; gol <b>'+d.bucket+"'</b> &middot; stato <b>"+d.state+'</b> al <b>'+d.minute+"'</b> &middot; <b>"+d.n_state+'</b> partite storiche in questo stato</div>';
+  if(d.rimonte){
+    var rb=d.rimonte; var who=(rb.first==='home'?'la casa':'l&#39;ospite');
+    h+='<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12.5px;color:#cbd5e1">'
+      +'&#x1F504; <b>Rimonte</b> &mdash; nel campionato, quando segna per prima '+who+' (come ora): '
+      +'vince <b style="color:#22c55e">'+rb.win+'%</b> &middot; pareggia <b style="color:#94a3b8">'+rb.draw+'%</b> &middot; perde <b style="color:#f87171">'+rb.loss+'%</b> '
+      +'<span style="color:#64748b">(n='+rb.n+')</span></div>';
+  }
+  if(d.markets&&d.markets.length){ h+=_anTable('&#x1F4B9; Mercati (condizionati sul minuto del 1&deg; gol)', d.markets); }
+  else { h+='<div style="color:#64748b;font-size:12.5px;margin:10px 0">Nessun mercato over/under/BTTS ancora aperto con campione sufficiente per questo stato.</div>'; }
+  if(d.x12&&d.x12.length){ h+=_anTable('&#x1F3C6; Esito finale 1X2 (su stato + minuto)', d.x12); }
+  if(d.ht_markets&&d.ht_markets.length){ h+=_anTable('&#x23F1;&#xFE0F; Primo tempo (solo prima del 45&#39;)', d.ht_markets); }
+  h+='<div style="margin-top:6px;font-size:11.5px;color:#94a3b8">Edge = base rate &minus; probabilit&agrave; implicita della quota bookie. <b style="color:#22c55e">Verde</b> = valore (quota &gt; quota equa). Ignora le righe con n&lt;50 (&#x26A0;). Con il <b>capitale</b> impostato, l&#39;esito mostra anche la puntata consigliata (1/4 di Kelly).</div>';
+  el.innerHTML=h;
+}
+function calcAnalisiEdge(inp){
+  var baseRate=parseFloat(inp.dataset.base), n=parseInt(inp.dataset.n,10);
+  var cap=parseFloat(document.getElementById('an-cap').value)||0;
+  var q=parseFloat(inp.value);
+  var row=inp.closest('tr');
+  var ec=row.querySelector('.an-edge'), vc=row.querySelector('.an-verdict');
+  if(!q||q<=1){ec.textContent='-';ec.style.color='#94a3b8';vc.innerHTML='-';vc.style.color='#94a3b8';return;}
+  var edge=baseRate-100.0/q;
+  ec.textContent=(edge>=0?'+':'')+edge.toFixed(1)+'%';
+  ec.style.color=edge>=0?'#22c55e':'#f87171';
+  var txt, col;
+  if(n<50){ txt='&#x26A0; n basso'; col='#f59e0b'; }
+  else if(edge>=3){ txt='&#x2705; valore'; col='#22c55e'; }
+  else if(edge<=0){ txt='&#x274C; no'; col='#f87171'; }
+  else { txt='~ margine'; col='#94a3b8'; }
+  if(cap>0 && edge>0){
+    var p=baseRate/100.0;
+    var f=(p*q-1)/(q-1);
+    if(f>0){ txt+=' &middot; &euro;'+(cap*f/4.0).toFixed(2); }
+  }
+  vc.innerHTML=txt; vc.style.color=col;
+}
+function recalcAnalisiStakes(){
+  document.querySelectorAll('#analisi-board input[data-mk]').forEach(function(i){ if(i.value){ calcAnalisiEdge(i); } });
+}
+async function askAnalisiWords(){
+  var box=document.getElementById('an-llm-box');
+  var lid=document.getElementById('an-league').value;
+  box.style.display='block';
+  if(!lid){ box.innerHTML='<div style="color:#f59e0b">Seleziona un campionato e premi prima Calcola analisi.</div>'; return; }
+  var fgm=document.getElementById('an-fgm').value;
+  if(fgm===''){ box.innerHTML='<div style="color:#f59e0b">Inserisci il minuto del 1&deg; gol (0-16).</div>'; return; }
+  var payload={
+    league:lid, fgm:fgm,
+    minute:(document.getElementById('an-minute').value||fgm),
+    sh:(document.getElementById('an-sh').value||'0'),
+    sa:(document.getElementById('an-sa').value||'0'),
+    first:(document.getElementById('an-first').value||''),
+    capitale:(document.getElementById('an-cap').value||''),
+    quotes:{}
+  };
+  document.querySelectorAll('#analisi-board input[data-mk]').forEach(function(i){
+    var v=parseFloat(i.value); if(v&&v>1){ payload.quotes[i.dataset.mk]=v; }
+  });
+  box.innerHTML='<div style="color:#94a3b8">&#x1F9E0; Sto analizzando con l&#39;AI... (qualche secondo)</div>';
+  try{
+    var r=await fetch('/api/live-analysis-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var d=await r.json();
+    if(d.error){ box.innerHTML='<div style="color:#f59e0b;font-size:13px;line-height:1.5">'+d.error+'</div>'; return; }
+    var a=d.analysis||{};
+    var safe=(a.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    var meta='';
+    if(a.model){
+      meta='<div style="margin-top:10px;font-size:11px;color:#64748b;border-top:1px solid #3b2d5f;padding-top:6px">Modello: '+a.model
+        +((a.in_tokens!=null&&a.out_tokens!=null)?(' &middot; '+a.in_tokens+' token in / '+a.out_tokens+' out'):'')+'</div>';
+    }
+    box.innerHTML='<div style="line-height:1.6;color:#e9e3f7;font-size:13.5px">'+safe+'</div>'+meta;
+  }catch(e){ box.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
 }
 
 // === Scanner nicchie (tutti i campionati) ===
