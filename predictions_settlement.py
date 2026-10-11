@@ -968,9 +968,14 @@ def _llm_analysis(board, quotes, capitale):
     model = os.getenv('LLM_MODEL', 'claude-sonnet-5-5')
     import urllib.request as _u
     import urllib.error as _ue
+    # max_tokens generoso: 900 era troppo basso e, con il "thinking" attivo di
+    # default su Sonnet 5.5, il ragionamento esauriva il budget -> risposta troncata
+    # o vuota. effort "low" tiene il ragionamento al minimo (piu' veloce ed economico)
+    # ed e' accettato da tutti i modelli, anche se si cambia LLM_MODEL.
     body = json.dumps({
         'model': model,
-        'max_tokens': 900,
+        'max_tokens': 2000,
+        'output_config': {'effort': 'low'},
         'system': _LLM_SYSTEM,
         'messages': [{'role': 'user', 'content': _live_analysis_data_block(board, quotes, capitale)}],
     }).encode('utf-8')
