@@ -302,6 +302,12 @@
     </div>
     <div style="font-size:11px;color:#64748b;margin:-2px 0 12px 0">&#x2139;&#xFE0F; Gol casa / Gol ospite = punteggio <b>attuale</b> (1-0 = ha segnato la casa, 0-1 = l&#39;ospite). Il 1&deg; gol &egrave; sempre entro il 16&#39; (dataset early-goal).</div>
     <div id="analisi-board"><div style="color:#64748b;font-size:13px">Scegli una partita live o inserisci i dati e premi <b>Calcola analisi</b>.</div></div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input type="file" id="an-ocr-file" accept="image/*" multiple style="display:none" onchange="onOddsScreens(this)">
+      <button onclick="document.getElementById(&#39;an-ocr-file&#39;).click()" style="padding:9px 16px;background:#0e7490;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">&#x1F4F7; Carica screenshot quote</button>
+      <span style="font-size:11px;color:#64748b">Betfair: 1 screen 1X2 &middot; 1 Over/Under &middot; 1 BTTS. Si sommano. Le quote si compilano da sole (modificabili). ~&euro;0,0003 a screen.</span>
+    </div>
+    <div id="an-ocr-status" style="display:none;margin-top:8px;font-size:12.5px;color:#cbd5e1"></div>
     <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button onclick="askAnalisiWords()" style="padding:9px 18px;background:#a855f7;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">&#x1F9E0; Analisi a parole (AI)</button>
       <span style="font-size:11px;color:#64748b">Usa i numeri della board + le quote che hai digitato. Costo per analisi: pochi centesimi (modello Sonnet).</span>
@@ -1914,6 +1920,76 @@ async function askAnalisiWords(){
     }
     box.innerHTML='<div style="line-height:1.6;color:#e9e3f7;font-size:13.5px">'+safe+'</div>'+meta;
   }catch(e){ box.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
+}
+
+// === OCR quote da screenshot (Betfair) -> auto-compila i campi Quota bookie ===
+function _fileToB64Resized(file, maxDim){
+  return new Promise(function(resolve, reject){
+    var fr=new FileReader();
+    fr.onerror=function(){ reject(new Error('lettura file fallita')); };
+    fr.onload=function(){
+      var durl=fr.result;
+      var img=new Image();
+      img.onerror=function(){ resolve(durl); };
+      img.onload=function(){
+        var w=img.width, h=img.height, scale=Math.min(1, maxDim/Math.max(w,h));
+        if(scale>=1){ resolve(durl); return; }
+        try{
+          var c=document.createElement('canvas');
+          c.width=Math.round(w*scale); c.height=Math.round(h*scale);
+          c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+          resolve(c.toDataURL('image/jpeg',0.85));
+        }catch(e){ resolve(durl); }
+      };
+      img.src=durl;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+function _parseDataUrl(durl){
+  var m=/^data:(image\/[a-z]+);base64,(.*)$/i.exec(durl||'');
+  if(m){ return {media:m[1], b64:m[2]}; }
+  return {media:'image/jpeg', b64:(durl||'').replace(/^data:[^,]*,/,'')};
+}
+function _applyOcrOdds(odds){
+  var n=0;
+  Object.keys(odds||{}).forEach(function(mk){
+    var v=parseFloat(odds[mk]); if(!v||v<=1){ return; }
+    var inp=document.querySelector('#analisi-board input[data-mk="'+mk+'"]');
+    if(inp){
+      inp.value=v;
+      inp.style.background='#14321e'; inp.style.borderColor='#22c55e';
+      inp.dispatchEvent(new Event('input',{bubbles:true}));
+      n++;
+    }
+  });
+  return n;
+}
+async function onOddsScreens(input){
+  var files=Array.prototype.slice.call(input.files||[]);
+  if(!files.length){ return; }
+  var status=document.getElementById('an-ocr-status');
+  status.style.display='block';
+  var boardInputs=document.querySelectorAll('#analisi-board input[data-mk]');
+  if(!boardInputs.length){
+    status.innerHTML='<span style="color:#f59e0b">Premi prima <b>Calcola analisi</b>, poi carica gli screenshot.</span>';
+    input.value=''; return;
+  }
+  var open=Array.prototype.slice.call(boardInputs).map(function(i){ return i.dataset.mk; });
+  var tot=0;
+  for(var k=0;k<files.length;k++){
+    status.innerHTML='&#x1F4F7; Leggo screenshot '+(k+1)+'/'+files.length+'...';
+    try{
+      var durl=await _fileToB64Resized(files[k],1500);
+      var pd=_parseDataUrl(durl);
+      var r=await fetch('/api/parse-odds-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image_b64:pd.b64,media_type:pd.media,open_markets:open})});
+      var d=await r.json();
+      if(d.error){ status.innerHTML='<span style="color:#f59e0b">'+d.error+'</span>'; continue; }
+      tot+=_applyOcrOdds(d.odds||{});
+    }catch(e){ status.innerHTML='<span style="color:#f87171">Errore: '+e.message+'</span>'; }
+  }
+  status.innerHTML='&#x2705; Compilati <b>'+tot+'</b> mercati dagli screenshot. Controlla i valori <span style="color:#22c55e">evidenziati</span> e correggi se serve.';
+  input.value='';
 }
 
 // === Scanner nicchie (tutti i campionati) ===

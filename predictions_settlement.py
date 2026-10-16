@@ -1009,6 +1009,102 @@ def _llm_analysis(board, quotes, capitale):
             'in_tokens': usage.get('input_tokens'), 'out_tokens': usage.get('output_tokens')}, None
 
 
+# === OCR quote da screenshot (Betfair Exchange) -> auto-compilazione board ===
+
+_OCR_SYSTEM = (
+    "Sei un estrattore di quote da screenshot di scommesse calcistiche (di solito Betfair Exchange). "
+    "Leggi SOLO i numeri presenti nell'immagine: non inventare quote non visibili. "
+    "Su Betfair Exchange ci sono prezzi di BANCA (back, celle blu) e BANCATA (lay, celle rosa): "
+    "prendi SEMPRE il miglior prezzo BACK (banca), cioe' la cella blu piu' a destra, adiacente alla colonna rosa. "
+    "Se per una selezione c'e' un solo prezzo (bookmaker classico), prendi quello. "
+    "Restituisci SOLO un oggetto JSON (nessun testo attorno, niente markdown) con queste chiavi, quando il mercato e' visibile:\n"
+    "- \"1\",\"X\",\"2\": esito finale (Match Odds / 1X2): 1=Casa/Home, X=Pareggio/Draw/The Draw, 2=Ospite/Away\n"
+    "- \"over_1_5\",\"over_2_5\",\"over_3_5\",\"over_4_5\": Over totale gol a quella linea (es. Over 2.5 Goals)\n"
+    "- \"under_1_5\",\"under_2_5\",\"under_3_5\",\"under_4_5\": Under totale gol a quella linea\n"
+    "- \"btts_si\",\"btts_no\": entrambe le squadre segnano (Both Teams to Score): si=Yes, no=No\n"
+    "- \"over_1_5_ht\",\"over_2_5_ht\": Over del PRIMO TEMPO (1st Half)\n"
+    "Valori = quota decimale come numero (es. 1.85). Ometti le chiavi non presenti nell'immagine. "
+    "Attenzione a non confondere le linee tra loro: la quota di Over 2.5 va su \"over_2_5\", non su \"over_1_5\"."
+)
+
+
+def _extract_json(text):
+    """Estrae il primo oggetto JSON da un testo (togliendo eventuali fence markdown)."""
+    if not text:
+        return {}
+    t = text.strip()
+    if t.startswith('```'):
+        t = _re_bets.sub(r'^```[a-zA-Z]*\s*', '', t)
+        t = t.replace('```', '').strip()
+    a = t.find('{')
+    b = t.rfind('}')
+    if a >= 0 and b > a:
+        try:
+            return json.loads(t[a:b + 1])
+        except Exception:
+            return {}
+    return {}
+
+
+def _ocr_odds_image(image_b64, media_type, open_markets=None):
+    """Legge le quote da uno screenshot via modello vision (Haiku di default, env
+    OCR_MODEL). Ritorna ({odds:{market:quota}, ...}, None) o (None, err). L'immagine
+    NON viene salvata da nessuna parte: usata solo per questa chiamata."""
+    api_key = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return None, 'Lettura screenshot non configurata: manca ANTHROPIC_API_KEY su Render.'
+    model = os.getenv('OCR_MODEL', 'claude-haiku-5-5')
+    hint = ''
+    if open_markets:
+        keys = [k for k in open_markets if isinstance(k, str)][:30]
+        if keys:
+            hint = ' Mercati aperti sulla lavagna (riempili se li vedi): ' + ', '.join(keys) + '.'
+    user_text = 'Estrai le quote da questo screenshot di scommesse calcistiche.' + hint + ' Restituisci SOLO il JSON.'
+    import urllib.request as _u
+    import urllib.error as _ue
+    body = json.dumps({
+        'model': model,
+        'max_tokens': 800,
+        'output_config': {'effort': 'low'},
+        'system': _OCR_SYSTEM,
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'image', 'source': {'type': 'base64', 'media_type': media_type, 'data': image_b64}},
+            {'type': 'text', 'text': user_text},
+        ]}],
+    }).encode('utf-8')
+    req = _u.Request('https://api.anthropic.com/v1/messages', data=body, headers={
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+    })
+    try:
+        with _u.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read().decode('utf-8'))
+    except _ue.HTTPError as e:
+        try:
+            det = json.loads(e.read().decode('utf-8', 'replace'))
+            msg = (det.get('error') or {}).get('message') or ('HTTP %s' % e.code)
+        except Exception:
+            msg = 'HTTP %s' % e.code
+        return None, ('Errore lettura screenshot (%s): %s' % (e.code, str(msg)[:160]))
+    except Exception as e:
+        return None, ('Errore nella lettura dello screenshot: %s' % (str(e)[:160]))
+    text = ''.join(b.get('text', '') for b in (data.get('content') or []) if b.get('type') == 'text')
+    parsed = _extract_json(text)
+    odds = {}
+    if isinstance(parsed, dict):
+        for k, v in parsed.items():
+            try:
+                fv = float(v)
+                if fv > 1:
+                    odds[str(k)] = round(fv, 3)
+            except Exception:
+                pass
+    usage = data.get('usage') or {}
+    return {'odds': odds, 'model': data.get('model', model),
+            'in_tokens': usage.get('input_tokens'), 'out_tokens': usage.get('output_tokens')}, None
+
+
 def _norm_toks(s):
     """Token normalizzati di un nome squadra (minuscolo, senza accenti, >=3 lettere)."""
     import unicodedata as _ud, re as _re2
@@ -2323,6 +2419,30 @@ def register(app):
             if err:
                 return jsonify({'error': err})
             return jsonify({'analysis': result})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/parse-odds-image', methods=['POST'])
+    def api_parse_odds_image():
+        """Legge uno screenshot di quote (es. Betfair Exchange) e restituisce
+        {mercato: quota} per auto-compilare la board di Analisi Live. L'immagine NON
+        viene salvata: elaborata in memoria e scartata a fine richiesta. Lettura con
+        modello vision (Haiku di default, env OCR_MODEL)."""
+        try:
+            p = request.get_json(silent=True) or {}
+            img = p.get('image_b64') or ''
+            if not img:
+                return jsonify({'error': 'immagine mancante'}), 400
+            if len(img) > 9000000:
+                return jsonify({'error': 'immagine troppo grande: riduci la risoluzione (max ~6MB)'}), 400
+            media = p.get('media_type') or 'image/jpeg'
+            if media not in ('image/jpeg', 'image/png', 'image/webp', 'image/gif'):
+                media = 'image/jpeg'
+            open_markets = p.get('open_markets') if isinstance(p.get('open_markets'), list) else None
+            res, err = _ocr_odds_image(img, media, open_markets)
+            if err:
+                return jsonify({'error': err})
+            return jsonify(res)
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
