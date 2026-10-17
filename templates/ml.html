@@ -90,6 +90,7 @@
      <div class="tab" data-view="late">&#x23F1;&#xFE0F; Gol tardivi</div>
      <div class="tab" data-view="invest">&#x1F4A1; Investi Live</div>
      <div class="tab" data-view="analisi">&#x1F9E0; Analisi Live</div>
+     <div class="tab" data-view="storico">&#x1F4C1; Storico salvato</div>
   </div>
 
   <section class="view" id="view-andamento">
@@ -291,6 +292,7 @@
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
       <div><label style="font-size:11px;color:#94a3b8;display:block">Campionato</label><select id="an-league" style="min-width:170px"></select></div>
+      <div><label style="font-size:11px;color:#94a3b8;display:block">Partita (squadre, facolt.)</label><input type="text" id="an-teams" placeholder="es. Madryn-Chaco" style="width:170px"></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto 1&deg; gol (0-16)</label><input type="number" id="an-fgm" value="7" min="0" max="16" style="width:70px"></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Minuto attuale</label><input type="number" id="an-minute" value="65" min="0" max="120" style="width:70px"></div>
       <div><label style="font-size:11px;color:#94a3b8;display:block">Gol casa</label><input type="number" id="an-sh" value="0" min="0" max="20" style="width:56px"></div>
@@ -313,6 +315,20 @@
       <span style="font-size:11px;color:#64748b">Usa i numeri della board + le quote che hai digitato. Costo per analisi: pochi centesimi (modello Sonnet).</span>
     </div>
     <div id="an-llm-box" style="display:none;margin-top:12px;background:#140f24;border:1px solid #3b2d5f;border-left:3px solid #a855f7;border-radius:8px;padding:14px 16px"></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid #1e293b;padding-top:12px">
+      <button onclick="saveAnalisi()" style="padding:9px 18px;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">&#x1F4BE; Salva nello storico</button>
+      <span style="font-size:11px;color:#64748b">Salva partita + quote + lettura. Premi dopo <b>Analisi a parole</b>. Le rivedi nel tab <b>&#x1F4C1; Storico salvato</b>.</span>
+    </div>
+    <div id="an-save-status" style="display:none;margin-top:8px;font-size:12.5px;color:#cbd5e1"></div>
+  </section>
+
+  <section class="view" id="view-storico">
+    <style>#view-storico input{padding:6px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;font-size:13px}#view-storico details{margin-top:8px}#view-storico summary{cursor:pointer;color:#a855f7;font-size:12.5px}</style>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <div style="font-size:12.5px;color:#cbd5e1;flex:1;min-width:240px">&#x1F4C1; <b>Storico salvato</b> &mdash; le partite salvate da Analisi Live (partita, quote, lettura AI, mercati a edge alto). Scrivi il <b>risultato</b> dopo la partita per chiudere il cerchio.</div>
+      <button onclick="loadStorico()" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:6px;cursor:pointer">&#x21BB; aggiorna</button>
+    </div>
+    <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
   </section>
 
   <section class="view" id="view-seg">
@@ -726,6 +742,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     if (t.dataset.view === "late") loadLateInit();
     if (t.dataset.view === "invest") loadInvestInit();
     if (t.dataset.view === "analisi") loadAnalisiInit();
+    if (t.dataset.view === "storico") loadStorico();
   });
 });
 
@@ -1776,6 +1793,7 @@ async function loadAnalisiLive(){
       o.textContent=(m.league||'')+': '+m.home+' vs '+m.away+'  '+m.score+'  ('+(m.minute||'?')+"')";
       o.dataset.lid=m.league_id; o.dataset.min=m.minute||''; o.dataset.score=m.score||'';
       o.dataset.fgm=(m.first_goal_min!=null?m.first_goal_min:'');
+      o.dataset.home=m.home||''; o.dataset.away=m.away||''; o.dataset.fid=(m.fixture_id!=null?m.fixture_id:'');
       sel.appendChild(o);
     });
   }catch(e){}
@@ -1788,6 +1806,8 @@ function pickAnalisiLive(){
   if(lid){document.getElementById('an-league').value=lid;}
   if(mn){document.getElementById('an-minute').value=mn;}
   if(opt.dataset.fgm!==''){document.getElementById('an-fgm').value=opt.dataset.fgm;}
+  if(opt.dataset.home||opt.dataset.away){document.getElementById('an-teams').value=(opt.dataset.home||'')+'-'+(opt.dataset.away||'');}
+  window._anFixtureId=(opt.dataset.fid!==''?parseInt(opt.dataset.fid,10):null);
   if(sc.length===2){
     document.getElementById('an-sh').value=sc[0];
     document.getElementById('an-sa').value=sc[1];
@@ -1843,7 +1863,9 @@ function _anTable(title, arr){
   t+='</tbody></table></div>';
   return head+t;
 }
+var _anLastBoard=null;
 function renderAnalisiBoard(d){
+  _anLastBoard=d;
   var el=document.getElementById('analisi-board');
   var h='<div style="margin-bottom:8px;font-size:12.5px;color:#cbd5e1">'
     +(d.league?('<b>'+d.league+'</b> &middot; '):'')
@@ -1990,6 +2012,110 @@ async function onOddsScreens(input){
   }
   status.innerHTML='&#x2705; Compilati <b>'+tot+'</b> mercati dagli screenshot. Controlla i valori <span style="color:#22c55e">evidenziati</span> e correggi se serve.';
   input.value='';
+}
+
+// === Storico salvato (salva analisi + rivedi + risultato) ===
+function _escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function saveAnalisi(){
+  var status=document.getElementById('an-save-status');
+  status.style.display='block';
+  if(!_anLastBoard){ status.innerHTML='<span style="color:#f59e0b">Premi prima <b>Calcola analisi</b>.</span>'; return; }
+  var rows=[], flagged=[];
+  document.querySelectorAll('#analisi-board input[data-mk]').forEach(function(i){
+    var row=i.closest('tr');
+    var mk=i.dataset.mk, base=parseFloat(i.dataset.base), n=parseInt(i.dataset.n,10);
+    var q=parseFloat(i.value)||null;
+    var edgeTxt=row.querySelector('.an-edge').textContent;
+    var label=(row.children[0].textContent||'').replace(/⚠.*/,'').trim();
+    rows.push({market:mk,label:label,base_rate:base,n:n,bookie:q,edge:edgeTxt});
+    var ev=parseFloat((edgeTxt||'').replace('%','').replace('+',''));
+    if(q && !isNaN(ev) && ev>=10){ flagged.push({market:mk,label:label,quota:q,edge:edgeTxt,base_rate:base,n:n}); }
+  });
+  var analysisText='';
+  var box=document.getElementById('an-llm-box');
+  if(box && box.style.display!=='none'){ analysisText=box.innerText||''; }
+  var selL=document.getElementById('an-league');
+  var payload={
+    fixture_id:(window._anFixtureId||null),
+    league_id:(selL.value||null),
+    league_name:((selL.selectedOptions&&selL.selectedOptions[0])?selL.selectedOptions[0].text:null),
+    teams:(document.getElementById('an-teams').value||null),
+    state:_anLastBoard.state, fgm:_anLastBoard.fgm, minute:_anLastBoard.minute, first_team:(_anLastBoard.first_team||null),
+    board:{ header:{league:_anLastBoard.league,state:_anLastBoard.state,minute:_anLastBoard.minute,bucket:_anLastBoard.bucket,n_state:_anLastBoard.n_state,rimonte:_anLastBoard.rimonte}, rows:rows },
+    flagged:flagged,
+    analysis_text:analysisText
+  };
+  status.innerHTML='Salvo...';
+  try{
+    var r=await fetch('/api/save-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    var d=await r.json();
+    if(d.error){ status.innerHTML='<span style="color:#f87171">'+d.error+'</span>'; return; }
+    status.innerHTML='&#x2705; Salvata nello <b>Storico salvato</b>'+(flagged.length?(' &middot; '+flagged.length+' mercato/i a edge alto flaggato/i'):'')+(analysisText?'':' <span style="color:#f59e0b">(senza lettura AI: conviene fare prima Analisi a parole)</span>')+'.';
+  }catch(e){ status.innerHTML='<span style="color:#f87171">Errore: '+e.message+'</span>'; }
+}
+async function loadStorico(){
+  var el=document.getElementById('storico-list');
+  el.innerHTML='<div style="color:#64748b;font-size:13px">Carico...</div>';
+  try{
+    var r=await fetch('/api/saved-analyses');var d=await r.json();
+    if(d.error){ el.innerHTML='<div style="color:#f87171">'+d.error+'</div>'; return; }
+    var list=d.saved||[];
+    if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
+    el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
+  }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
+}
+function renderSavedCard(s){
+  var date=''; try{ date=new Date((s.ts||0)*1000).toLocaleString('it-IT'); }catch(e){}
+  var head=(s.teams?('<b>'+_escHtml(s.teams)+'</b> &middot; '):'')+_escHtml(s.league_name||'')+' &middot; stato <b>'+_escHtml(s.state||'?')+'</b> al <b>'+(s.minute||'?')+"'</b>";
+  var flaggedHtml='';
+  (s.flagged||[]).forEach(function(f){
+    flaggedHtml+='<span style="display:inline-block;background:#3b1d1d;border:1px solid #7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 8px;margin:2px 4px 2px 0;font-size:12px">'+_escHtml(f.label)+' @'+f.quota+' <b>'+_escHtml(f.edge||'')+'</b> (n='+(f.n!=null?f.n:'?')+')</span>';
+  });
+  var rows=((s.board||{}).rows)||[];
+  var boardRows='';
+  rows.forEach(function(rr){
+    if(rr.bookie){
+      boardRows+='<tr><td style="padding:3px 8px;color:#e2e8f0">'+_escHtml(rr.label||rr.market)+'</td>'
+        +'<td style="padding:3px 8px;text-align:center;color:#93c5fd">'+(rr.base_rate!=null?rr.base_rate+'%':'-')+'</td>'
+        +'<td style="padding:3px 8px;text-align:center">'+rr.bookie+'</td>'
+        +'<td style="padding:3px 8px;text-align:center;color:#94a3b8">'+(rr.n!=null?rr.n:'-')+'</td>'
+        +'<td style="padding:3px 8px;text-align:center;font-weight:600">'+_escHtml(rr.edge||'-')+'</td></tr>';
+    }
+  });
+  var boardHtml=boardRows?('<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px"><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:3px 8px">Mercato</th><th style="padding:3px 8px">%</th><th style="padding:3px 8px">Quota</th><th style="padding:3px 8px">n</th><th style="padding:3px 8px">Edge</th></tr></thead><tbody>'+boardRows+'</tbody></table>'):'';
+  var analysisHtml=s.analysis_text?('<details><summary>Lettura AI</summary><div style="margin-top:6px;font-size:12.5px;color:#cbd5e1;line-height:1.55">'+_escHtml(s.analysis_text).replace(/\n/g,'<br>')+'</div></details>'):'';
+  var res=(s.result||'');
+  return '<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:12px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><div style="font-size:13px;color:#cbd5e1">'+head+'</div><div style="font-size:11px;color:#64748b">'+date+'</div></div>'
+    +(flaggedHtml?('<div style="margin-top:6px"><span style="font-size:11px;color:#94a3b8">Edge alto flaggato:</span><br>'+flaggedHtml+'</div>'):'')
+    +boardHtml
+    +analysisHtml
+    +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<label style="font-size:12px;color:#94a3b8">Risultato:</label>'
+    +'<input type="text" id="res-'+s.id+'" value="'+_escHtml(res).replace(/"/g,"&quot;")+'" placeholder="es. 2-1, uscito il 2" style="width:200px">'
+    +'<button onclick="saveStoricoResult('+s.id+')" style="padding:6px 12px;background:#15803d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">Salva esito</button>'
+    +'<button onclick="deleteStorico('+s.id+')" style="padding:6px 12px;background:#7f1d1d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px">Elimina</button>'
+    +'<span id="resmsg-'+s.id+'" style="font-size:11px;color:#22c55e"></span>'
+    +'</div></div>';
+}
+async function saveStoricoResult(id){
+  var inp=document.getElementById('res-'+id);
+  var msg=document.getElementById('resmsg-'+id);
+  try{
+    var r=await fetch('/api/saved-analysis-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,result:inp.value})});
+    var d=await r.json();
+    if(d.error){ msg.style.color='#f87171'; msg.textContent=d.error; return; }
+    msg.style.color='#22c55e'; msg.textContent='salvato';
+  }catch(e){ msg.style.color='#f87171'; msg.textContent='errore'; }
+}
+async function deleteStorico(id){
+  if(!confirm('Eliminare questa partita salvata?')){ return; }
+  try{
+    var r=await fetch('/api/delete-saved-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+    var d=await r.json();
+    if(d.error){ alert(d.error); return; }
+    loadStorico();
+  }catch(e){ alert('Errore: '+e.message); }
 }
 
 // === Scanner nicchie (tutti i campionati) ===

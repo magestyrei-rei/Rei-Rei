@@ -519,6 +519,30 @@ def _ensure_bets_ddl():
     except Exception:
         pass  # colonna gia' presente
 
+
+DDL_SAVED = """
+CREATE TABLE IF NOT EXISTS saved_analyses (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts            INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+  fixture_id    INTEGER,
+  league_id     INTEGER,
+  league_name   TEXT,
+  teams         TEXT,
+  state         TEXT,
+  fgm           INTEGER,
+  minute        INTEGER,
+  first_team    TEXT,
+  board_json    TEXT,
+  analysis_text TEXT,
+  flagged       TEXT,
+  result        TEXT
+)
+""".strip()
+
+
+def _ensure_saved_ddl():
+    _turso_execute(DDL_SAVED)
+
 def _bet_market_win(market, fh, fa):
     """Esito di un mercato dato il risultato FT. None se non valutabile."""
     if fh is None or fa is None:
@@ -2443,6 +2467,86 @@ def register(app):
             if err:
                 return jsonify({'error': err})
             return jsonify(res)
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/save-analysis', methods=['POST'])
+    def api_save_analysis():
+        """Salva nello storico una analisi (partita + board + quote + lettura AI +
+        mercati a edge alto flaggati). Tabella Turso saved_analyses."""
+        try:
+            p = request.get_json(silent=True) or {}
+            _ensure_saved_ddl()
+
+            def _i(v):
+                try:
+                    return int(v)
+                except Exception:
+                    return None
+            board = p.get('board')
+            flagged = p.get('flagged')
+            board_json = json.dumps(board, ensure_ascii=False) if board is not None else None
+            flagged_json = json.dumps(flagged, ensure_ascii=False) if flagged is not None else None
+            _turso_execute(
+                "INSERT INTO saved_analyses (ts, fixture_id, league_id, league_name, teams, state, "
+                "fgm, minute, first_team, board_json, analysis_text, flagged, result) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [int(time.time()), _i(p.get('fixture_id')), _i(p.get('league_id')),
+                 (p.get('league_name') or None), (p.get('teams') or None), (p.get('state') or None),
+                 _i(p.get('fgm')), _i(p.get('minute')), (p.get('first_team') or None),
+                 board_json, (p.get('analysis_text') or None), flagged_json, (p.get('result') or None)]
+            )
+            return jsonify({'ok': True})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/saved-analyses')
+    def api_saved_analyses():
+        """Elenco delle analisi salvate (piu' recenti prima)."""
+        try:
+            _ensure_saved_ddl()
+            rows = _turso_select_rows(
+                "SELECT id, ts, fixture_id, league_id, league_name, teams, state, fgm, minute, "
+                "first_team, board_json, analysis_text, flagged, result "
+                "FROM saved_analyses ORDER BY ts DESC, id DESC LIMIT 300")
+            for r in rows:
+                for k in ('board_json', 'flagged'):
+                    if r.get(k):
+                        try:
+                            r[k] = json.loads(r[k])
+                        except Exception:
+                            pass
+            return jsonify({'saved': rows})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/saved-analysis-result', methods=['POST'])
+    def api_saved_analysis_result():
+        """Aggiorna il campo 'risultato' di una analisi salvata (compilato dall'utente
+        dopo la partita)."""
+        try:
+            p = request.get_json(silent=True) or {}
+            sid = int(p.get('id') or 0)
+            if not sid:
+                return jsonify({'error': 'id mancante'}), 400
+            _ensure_saved_ddl()
+            _turso_execute("UPDATE saved_analyses SET result=? WHERE id=?",
+                           [(p.get('result') or None), sid])
+            return jsonify({'ok': True})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/delete-saved-analysis', methods=['POST'])
+    def api_delete_saved_analysis():
+        """Elimina una analisi salvata."""
+        try:
+            p = request.get_json(silent=True) or {}
+            sid = int(p.get('id') or 0)
+            if not sid:
+                return jsonify({'error': 'id mancante'}), 400
+            _ensure_saved_ddl()
+            _turso_execute("DELETE FROM saved_analyses WHERE id=?", [sid])
+            return jsonify({'ok': True})
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
