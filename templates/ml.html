@@ -2160,7 +2160,7 @@ function _storFam(mk){
   if(mk.indexOf('under_')===0){ return 'Under'; }
   return null;
 }
-function _famLabel(f){ return f==='Longshot'?'Longshot (1 / 2)':(f==='BTTS Si'?'BTTS S&igrave;':f); }
+function _famLabel(f){ if(f==='Longshot'){return 'Longshot (1 / 2)';} if(f==='Esito opposto'){return 'Esito opposto (1/2)';} if(f==='BTTS Si'){return 'BTTS S&igrave;';} return f; }
 function _mktLabel(mk){
   var L={'1':'1 (Casa)','X':'X (Pareggio)','2':'2 (Ospite)',
     over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',over_4_5:'Over 4.5',over_5_5:'Over 5.5',
@@ -2180,7 +2180,7 @@ function _oppQuote(rec, mk){
   var rb=_rowVal(rec, mk, 'bookie'); if(rb!=null){ var rv=parseFloat(rb); if(rv>1){ return rv; } }
   return null;
 }
-function _oppInfo(mk, q, baseRate, rec){
+function _oppInfo(mk, q, baseRate, rec, esitoMode){
   var COMP={over_1_5:'under_1_5',under_1_5:'over_1_5',over_2_5:'under_2_5',under_2_5:'over_2_5',over_3_5:'under_3_5',under_3_5:'over_3_5',over_4_5:'under_4_5',under_4_5:'over_4_5',over_5_5:'under_5_5',under_5_5:'over_5_5',btts_si:'btts_no',btts_no:'btts_si'};
   if(COMP[mk]){
     var om=COMP[mk];
@@ -2191,6 +2191,13 @@ function _oppInfo(mk, q, baseRate, rec){
     return { market:om, quota:Math.round(oq*100)/100, base_rate:(obr!=null?Math.round(obr*10)/10:null) };
   }
   if(mk==='1'||mk==='2'||mk==='X'){
+    if(esitoMode==='swap' && (mk==='1'||mk==='2')){
+      var sm=(mk==='1')?'2':'1';
+      var sq=_oppQuote(rec, sm);
+      if(!sq||sq<=1){ return null; }
+      var sbr=_rowVal(rec, sm, 'base_rate');
+      return { market:sm, quota:Math.round(sq*100)/100, base_rate:(sbr!=null?Math.round(sbr*10)/10:null) };
+    }
     var pair=mk==='1'?['X','2']:(mk==='2'?['1','X']:['1','2']);
     var qa=_oppQuote(rec,pair[0]), qb=_oppQuote(rec,pair[1]);
     if(!qa||!qb||qa<=1||qb<=1){ return null; }
@@ -2231,8 +2238,11 @@ function renderStoricoSintesi(list, forceOpen){
   var host=document.getElementById('storico-sintesi');
   if(!host){ return; }
   _storList=list||[];
-  var contro=(_storMode==='contro');
-  var FAM=contro?['Doppia chance','Over','Under','BTTS Si','BTTS No']:['Longshot','Under','Over','BTTS Si','BTTS No'];
+  var contro=(_storMode!=='mercato');
+  var esitoMode=(_storMode==='swap')?'swap':'dc';
+  var FAM=(_storMode==='mercato')?['Longshot','Under','Over','BTTS Si','BTTS No']
+         :(_storMode==='dc')?['Doppia chance','Over','Under','BTTS Si','BTTS No']
+         :['Esito opposto','Over','Under','BTTS Si','BTTS No'];
   var tot={}; FAM.forEach(function(f){ tot[f]={w:0,n:0,ret:0}; });
   var byLeague={}; var withRes=0;
   (list||[]).forEach(function(s){
@@ -2243,14 +2253,17 @@ function renderStoricoSintesi(list, forceOpen){
       var mk=f.market; var q=parseFloat(f.quota); if(!q||q<=1){ return; }
       var useMk, useQ, win;
       if(contro){
-        var opp=_oppInfo(mk, q, (f.base_rate!=null?parseFloat(f.base_rate):null), s);
+        var opp=_oppInfo(mk, q, (f.base_rate!=null?parseFloat(f.base_rate):null), s, esitoMode);
         if(!opp){ return; }
-        useMk=opp.market; useQ=opp.quota; win=_storWinOpp(mk, sc.h, sc.a);
+        useMk=opp.market; useQ=opp.quota;
+        win=(useMk.indexOf('dc_')===0)?_storWinOpp(mk, sc.h, sc.a):_storWin(useMk, sc.h, sc.a);
       } else {
         useMk=mk; useQ=q; win=_storWin(mk, sc.h, sc.a);
       }
       if(win===null){ return; }
-      var fam=_storFam(useMk); if(!fam){ return; }
+      var fam=_storFam(useMk);
+      if(_storMode==='swap' && fam==='Longshot'){ fam='Esito opposto'; }
+      if(!fam){ return; }
       var T=tot[fam]; T.n++; if(win){ T.w++; T.ret+=useQ; }
       if(!byLeague[lname]){ byLeague[lname]={}; }
       if(!byLeague[lname][fam]){ byLeague[lname][fam]={w:0,n:0,ret:0}; }
@@ -2264,8 +2277,7 @@ function renderStoricoSintesi(list, forceOpen){
   }
   var bodyDisp=forceOpen?'block':'none', chevInit=forceOpen?'&#x25BC;':'&#x25B6;';
   function _btn(m,txt){ var on=_storMode===m; return '<button onclick="setStorMode(&#39;'+m+'&#39;)" style="padding:5px 14px;border:none;cursor:pointer;font-size:12.5px;font-weight:600;background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#94a3b8')+'">'+txt+'</button>'; }
-  var toggle='<div style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden;margin:8px 0 8px">'+_btn('mercato','Mercato')+_btn('contro','Contro')+'</div>'
-    +'<span style="font-size:11px;color:#64748b;margin-left:10px">'+(contro?'investendo sul mercato OPPOSTO (quota derivata)':'investendo sul mercato flaggato')+'</span>';
+  var toggle='<div style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden;margin:8px 0 6px;flex-wrap:wrap">'+_btn('mercato','Mercato')+_btn('dc','Doppia chance')+_btn('swap','Esito opposto')+'</div>';
   var totHtml=FAM.map(function(f,i){
     var div=i>0?'border-top:0.5px solid #1e293b;':'';
     return '<div style="'+div+'">'+_storCell(_famLabel(f), tot[f], false)+'</div>';
@@ -2278,15 +2290,17 @@ function renderStoricoSintesi(list, forceOpen){
     return '<div style="border-top:0.5px solid #1e293b;padding-top:4px;margin-top:4px">'
       +'<div style="font-size:13px;font-weight:600;color:#e2e8f0;padding:2px 6px">'+_escHtml(nm)+'</div>'+rows+'</div>';
   }).join('');
-  var note=contro
-    ? 'Modalit&agrave; <b>Contro</b>: ROI se avessi puntato il mercato OPPOSTO. Quota opposta <b>derivata</b> (stima, &plusmn;margine exchange); doppia chance per i longshot.'
-    : 'Longshot = esiti 1/2 a quota lunga.';
+  var note=(_storMode==='mercato')
+    ? 'Modalit&agrave; <b>Mercato</b>: ROI puntando il mercato flaggato. Longshot = esiti 1/2 a quota lunga.'
+    : (_storMode==='dc')
+    ? 'Modalit&agrave; <b>Doppia chance</b>: ROI puntando l&#39;OPPOSTO; per i longshot copri gli ALTRI DUE esiti (es. flag 1 &rarr; X2). Quota opposta <b>derivata</b> (stima, &plusmn;margine).'
+    : 'Modalit&agrave; <b>Esito opposto</b>: ROI puntando l&#39;altro segno secco (flag 1 &rarr; punti 2, e viceversa). Quota dal bookie salvato.';
   host.innerHTML=
     '<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
     +'<div onclick="toggleStoricoSintesi()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
       +'<span style="font-size:16px">&#x1F4CA;</span>'
       +'<span style="font-size:14px;font-weight:600;color:#e2e8f0">Sintesi</span>'
-      +'<span style="font-size:11px;color:#64748b">'+withRes+' partite &middot; '+(contro?'contro':'mercato')+'</span>'
+      +'<span style="font-size:11px;color:#64748b">'+withRes+' partite &middot; '+_storMode+'</span>'
       +'<span id="sin-chev" style="margin-left:auto;color:#94a3b8">'+chevInit+'</span>'
     +'</div>'
     +'<div id="sin-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'
