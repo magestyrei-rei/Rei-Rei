@@ -2160,7 +2160,7 @@ function _storFam(mk){
   if(mk.indexOf('under_')===0){ return 'Under'; }
   return null;
 }
-function _famLabel(f){ if(f==='Longshot'){return 'Longshot (1 / 2)';} if(f==='Esito opposto'){return 'Esito opposto (1/2)';} if(f==='BTTS Si'){return 'BTTS S&igrave;';} return f; }
+function _famLabel(f){ if(f==='Longshot'){return 'Longshot (1 / 2)';} if(f==='Esito opposto'){return 'Esito opposto (1/2)';} if(f==='X + opposto'){return 'X + opposto (met&agrave;/met&agrave;)';} if(f==='BTTS Si'){return 'BTTS S&igrave;';} return f; }
 function _mktLabel(mk){
   var L={'1':'1 (Casa)','X':'X (Pareggio)','2':'2 (Ospite)',
     over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',over_4_5:'Over 4.5',over_5_5:'Over 5.5',
@@ -2208,6 +2208,17 @@ function _oppInfo(mk, q, baseRate, rec, esitoMode){
   }
   return null;
 }
+function _splitXopp(mk, rec, h, a){
+  var opp=(mk==='1')?'2':(mk==='2'?'1':null);
+  if(!opp){ return null; }
+  var qx=_oppQuote(rec,'X'), qo=_oppQuote(rec,opp);
+  if(!qx||!qo||qx<=1||qo<=1){ return null; }
+  var ret;
+  if(h===a){ ret=0.5*qx; }
+  else if((opp==='2'&&a>h)||(opp==='1'&&h>a)){ ret=0.5*qo; }
+  else { ret=0; }
+  return { ret:ret, covered:(ret>0) };
+}
 function _storRoi(c){ return c.n? ((c.ret-c.n)/c.n*100) : null; }
 function _storCell(label, c, indent){
   var pad=indent?'3px 6px 3px 18px':'5px 6px';
@@ -2239,10 +2250,10 @@ function renderStoricoSintesi(list, forceOpen){
   if(!host){ return; }
   _storList=list||[];
   var contro=(_storMode!=='mercato');
-  var esitoMode=(_storMode==='swap')?'swap':'dc';
   var FAM=(_storMode==='mercato')?['Longshot','Under','Over','BTTS Si','BTTS No']
          :(_storMode==='dc')?['Doppia chance','Over','Under','BTTS Si','BTTS No']
-         :['Esito opposto','Over','Under','BTTS Si','BTTS No'];
+         :(_storMode==='swap')?['Esito opposto','Over','Under','BTTS Si','BTTS No']
+         :['X + opposto','Over','Under','BTTS Si','BTTS No'];
   var tot={}; FAM.forEach(function(f){ tot[f]={w:0,n:0,ret:0}; });
   var byLeague={}; var withRes=0;
   (list||[]).forEach(function(s){
@@ -2251,23 +2262,28 @@ function renderStoricoSintesi(list, forceOpen){
     var lname=s.league_name||'?';
     (s.flagged||[]).forEach(function(f){
       var mk=f.market; var q=parseFloat(f.quota); if(!q||q<=1){ return; }
-      var useMk, useQ, win;
-      if(contro){
-        var opp=_oppInfo(mk, q, (f.base_rate!=null?parseFloat(f.base_rate):null), s, esitoMode);
-        if(!opp){ return; }
-        useMk=opp.market; useQ=opp.quota;
-        win=(useMk.indexOf('dc_')===0)?_storWinOpp(mk, sc.h, sc.a):_storWin(useMk, sc.h, sc.a);
+      var fam, covered, ret;
+      if(!contro){
+        var w0=_storWin(mk, sc.h, sc.a); if(w0===null){ return; }
+        fam=_storFam(mk); covered=w0; ret=w0?q:0;
+      } else if(_storMode==='split' && (mk==='1'||mk==='2')){
+        var sp=_splitXopp(mk, s, sc.h, sc.a); if(!sp){ return; }
+        fam='X + opposto'; covered=sp.covered; ret=sp.ret;
       } else {
-        useMk=mk; useQ=q; win=_storWin(mk, sc.h, sc.a);
+        var em=(_storMode==='swap')?'swap':'dc';
+        var opp=_oppInfo(mk, q, (f.base_rate!=null?parseFloat(f.base_rate):null), s, em);
+        if(!opp){ return; }
+        var w2=(opp.market.indexOf('dc_')===0)?_storWinOpp(mk, sc.h, sc.a):_storWin(opp.market, sc.h, sc.a);
+        if(w2===null){ return; }
+        fam=_storFam(opp.market);
+        if(_storMode==='swap' && fam==='Longshot'){ fam='Esito opposto'; }
+        covered=w2; ret=w2?opp.quota:0;
       }
-      if(win===null){ return; }
-      var fam=_storFam(useMk);
-      if(_storMode==='swap' && fam==='Longshot'){ fam='Esito opposto'; }
       if(!fam){ return; }
-      var T=tot[fam]; T.n++; if(win){ T.w++; T.ret+=useQ; }
+      var T=tot[fam]; T.n++; T.ret+=ret; if(covered){ T.w++; }
       if(!byLeague[lname]){ byLeague[lname]={}; }
       if(!byLeague[lname][fam]){ byLeague[lname][fam]={w:0,n:0,ret:0}; }
-      var L=byLeague[lname][fam]; L.n++; if(win){ L.w++; L.ret+=useQ; }
+      var L=byLeague[lname][fam]; L.n++; L.ret+=ret; if(covered){ L.w++; }
     });
   });
   var anyFlag=FAM.some(function(f){ return tot[f].n>0; });
@@ -2277,7 +2293,7 @@ function renderStoricoSintesi(list, forceOpen){
   }
   var bodyDisp=forceOpen?'block':'none', chevInit=forceOpen?'&#x25BC;':'&#x25B6;';
   function _btn(m,txt){ var on=_storMode===m; return '<button onclick="setStorMode(&#39;'+m+'&#39;)" style="padding:5px 14px;border:none;cursor:pointer;font-size:12.5px;font-weight:600;background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#94a3b8')+'">'+txt+'</button>'; }
-  var toggle='<div style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden;margin:8px 0 6px;flex-wrap:wrap">'+_btn('mercato','Mercato')+_btn('dc','Doppia chance')+_btn('swap','Esito opposto')+'</div>';
+  var toggle='<div style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden;margin:8px 0 6px;flex-wrap:wrap">'+_btn('mercato','Mercato')+_btn('dc','Doppia chance')+_btn('swap','Esito opposto')+_btn('split','X + opposto')+'</div>';
   var totHtml=FAM.map(function(f,i){
     var div=i>0?'border-top:0.5px solid #1e293b;':'';
     return '<div style="'+div+'">'+_storCell(_famLabel(f), tot[f], false)+'</div>';
@@ -2294,7 +2310,9 @@ function renderStoricoSintesi(list, forceOpen){
     ? 'Modalit&agrave; <b>Mercato</b>: ROI puntando il mercato flaggato. Longshot = esiti 1/2 a quota lunga.'
     : (_storMode==='dc')
     ? 'Modalit&agrave; <b>Doppia chance</b>: ROI puntando l&#39;OPPOSTO; per i longshot copri gli ALTRI DUE esiti (es. flag 1 &rarr; X2). Quota opposta <b>derivata</b> (stima, &plusmn;margine).'
-    : 'Modalit&agrave; <b>Esito opposto</b>: ROI puntando l&#39;altro segno secco (flag 1 &rarr; punti 2, e viceversa). Quota dal bookie salvato.';
+    : (_storMode==='swap')
+    ? 'Modalit&agrave; <b>Esito opposto</b>: ROI puntando l&#39;altro segno secco (flag 1 &rarr; punti 2, e viceversa). Quota dal bookie salvato.'
+    : 'Modalit&agrave; <b>X + opposto</b>: per i longshot, <b>mezzo stake su X + mezzo sull&#39;esito opposto</b> alle quote piene. Record = quante volte hai coperto (X o opposto); ROI = profitto/puntate.';
   host.innerHTML=
     '<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
     +'<div onclick="toggleStoricoSintesi()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
