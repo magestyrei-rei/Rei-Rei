@@ -803,7 +803,9 @@ def _live_analysis_build(lid, minute, sh, sa, fgm, first=None):
     # --- mercati over/under/btts/late + HT (condizionati sulla fascia del 1o gol) ---
     raw = _invest_scan(lid, minute, sh, sa, bucket)
     ht_raw = [m for m in raw if m.get('ht')]
-    cands = [m for m in raw if not m.get('ht') and m['n'] >= MIN_N_HIDE]
+    # 'late_goal' (gol dopo il 75') rimosso dalla board: l'utente prende i dati al
+    # 45'-60', quindi e' irrilevante e faceva solo rumore ("non valutabile").
+    cands = [m for m in raw if not m.get('ht') and m['n'] >= MIN_N_HIDE and m['market'] != 'late_goal']
 
     def _finish(m):
         m['low_sample'] = m['n'] < MIN_N_WARN
@@ -978,7 +980,12 @@ _LLM_SYSTEM = (
     "5) Una riga finale di cautela: sono stime storiche, i book sanno cose che lo storico non "
     "sa (infortuni, formazioni), gioca responsabilmente.\n"
     "Regole: diffida degli edge molto alti (>10%) o con n basso; un edge realistico e' +2/6%. "
-    "Se nessun mercato ha valore chiaro, dillo e consiglia di passare."
+    "Se nessun mercato ha valore chiaro, dillo e consiglia di passare.\n"
+    "IMPORTANTE sulle quote: ogni volta che nomini un mercato per cui nei dati e' fornita la "
+    "quota bookie, scrivi SEMPRE la quota accanto (es. 'BTTS No @1.95 -> edge +18.7%', "
+    "'Under 3.5 @1.46'), sia nei mercati di valore sia in quelli da evitare. NON indicare mai un "
+    "edge senza la sua quota. Se per un mercato la quota bookie NON e' fornita, dillo "
+    "esplicitamente ('quota non inserita') e NON dichiarare un edge per quel mercato."
 )
 
 
