@@ -2279,7 +2279,7 @@ function renderStoricoSintesi(list, forceOpen){
         if(_storMode==='swap' && fam==='Longshot'){ fam='Esito opposto'; }
         covered=w2; ret=w2?opp.quota:0;
       }
-      if(!fam){ return; }
+      if(!fam || !tot[fam]){ return; }
       var T=tot[fam]; T.n++; T.ret+=ret; if(covered){ T.w++; }
       if(!byLeague[lname]){ byLeague[lname]={}; }
       if(!byLeague[lname][fam]){ byLeague[lname][fam]={w:0,n:0,ret:0}; }
