@@ -1040,6 +1040,77 @@ def _llm_analysis(board, quotes, capitale):
             'in_tokens': usage.get('input_tokens'), 'out_tokens': usage.get('output_tokens')}, None
 
 
+_CONF_LLM_SYSTEM = (
+    "Sei un analista di scommesse calcistiche esperto, prudente e onesto. "
+    "Ti do il CONFRONTO nel tempo di alcune strategie sui primi gol (primo gol entro il 16'): "
+    "per ogni strategia hai ROI e record (vinte/totali) in due momenti - 'prima' (fino a un "
+    "giorno di taglio) e 'ora' (tutte le partite) - e la variazione in punti di ROI. "
+    "Analizza USANDO SOLO questi numeri: NON inventare dati, quote o percentuali non presenti. "
+    "Scrivi in italiano, tono pratico e diretto (come un amico esperto), al massimo ~180 parole. "
+    "Struttura cosi':\n"
+    "1) Cosa funziona ADESSO: strategie con ROI positivo e campione solido (n>=5). Citane SEMPRE "
+    "ROI e record.\n"
+    "2) Cosa e' CAMBIATO aggiungendo le partite recenti: chi e' migliorato e chi e' peggiorato, "
+    "citando la variazione in punti.\n"
+    "3) Cosa EVITARE: ROI negativo, oppure campione piccolo (n<3 = solo indicativo).\n"
+    "4) LONGSHOT (esiti 1/2 a quota lunga): confronta il seguirli DRITTI col ribaltarli a DOPPIA "
+    "CHANCE e di' quale conviene in base ai numeri.\n"
+    "5) Una riga finale di cautela: stime storiche su pochi dati, i book sanno cose che lo storico "
+    "non sa, gioca responsabilmente.\n"
+    "Regole: diffida dei ROI altissimi con n basso; NON dichiarare un edge solido sotto n=5. "
+    "Ogni volta che nomini una strategia scrivi SEMPRE il suo ROI e il record accanto. Se non c'e' "
+    "un segnale netto, dillo e consiglia di raccogliere piu' dati."
+)
+
+
+def _llm_confronto(data_text):
+    """Analisi 'a parole' del confronto nel tempo. Stessa plumbing di _llm_analysis
+    (urllib, niente SDK). Riceve gia' il blocco dati pronto (costruito dal frontend dai
+    numeri calcolati). Ritorna (result, err)."""
+    api_key = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_key:
+        return None, ("Analisi a parole non configurata: imposta ANTHROPIC_API_KEY su Render. "
+                      "La tabella e il riassunto automatico qui sopra funzionano comunque.")
+    model = os.getenv('LLM_MODEL', 'claude-sonnet-5-5')
+    import urllib.request as _u
+    import urllib.error as _ue
+    body = json.dumps({
+        'model': model,
+        'max_tokens': 1800,
+        'output_config': {'effort': 'low'},
+        'system': _CONF_LLM_SYSTEM,
+        'messages': [{'role': 'user', 'content': data_text}],
+    }).encode('utf-8')
+    req = _u.Request('https://api.anthropic.com/v1/messages', data=body, headers={
+        'x-api-key': api_key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+    })
+    try:
+        with _u.urlopen(req, timeout=45) as r:
+            data = json.loads(r.read().decode('utf-8'))
+    except _ue.HTTPError as e:
+        try:
+            det = json.loads(e.read().decode('utf-8', 'replace'))
+            msg = (det.get('error') or {}).get('message') or (str(det)[:200])
+        except Exception:
+            msg = 'HTTP %s' % e.code
+        hint = ''
+        if e.code in (401, 403):
+            hint = ' (chiave non valida o senza credito: controlla ANTHROPIC_API_KEY e il saldo su console.anthropic.com)'
+        elif e.code == 400 and 'model' in (msg or '').lower():
+            hint = " (modello non riconosciuto: imposta la env LLM_MODEL su un modello valido, es. claude-haiku-5-5)"
+        return None, ('Errore API Anthropic (%s): %s%s' % (e.code, msg[:200], hint))
+    except Exception as e:
+        return None, ('Errore nella chiamata all\'analisi a parole: %s' % (str(e)[:200]))
+    text = ''.join(b.get('text', '') for b in (data.get('content') or []) if b.get('type') == 'text').strip()
+    if not text:
+        return None, 'La risposta dell\'analisi a parole e\' arrivata vuota, riprova.'
+    usage = data.get('usage') or {}
+    return {'text': text, 'model': data.get('model', model),
+            'in_tokens': usage.get('input_tokens'), 'out_tokens': usage.get('output_tokens')}, None
+
+
 # === OCR quote da screenshot (Betfair Exchange) -> auto-compilazione board ===
 
 _OCR_SYSTEM = (
@@ -2447,6 +2518,24 @@ def register(app):
             capitale = (str(p.get('capitale')).strip() if p.get('capitale') not in (None, '') else '')
             board = _live_analysis_build(lid, minute, sh, sa, fgm, first)
             result, err = _llm_analysis(board, quotes, capitale)
+            if err:
+                return jsonify({'error': err})
+            return jsonify({'analysis': result})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/confronto-llm', methods=['POST'])
+    def api_confronto_llm():
+        """Analisi 'a parole' del Confronto nel tempo (Storico). Il frontend calcola i
+        numeri (ROI/record prima vs ora per strategia) e manda gia' il blocco testo
+        pronto in `data`; qui si inoltra all'LLM. Se manca ANTHROPIC_API_KEY ritorna un
+        messaggio chiaro (tabella e riassunto automatico restano validi)."""
+        try:
+            p = request.get_json(silent=True) or {}
+            data_text = (p.get('data') or '').strip()[:8000]
+            if len(data_text) < 20:
+                return jsonify({'error': 'Dati del confronto mancanti: apri il pannello Confronto e riprova.'}), 400
+            result, err = _llm_confronto(data_text)
             if err:
                 return jsonify({'error': err})
             return jsonify({'analysis': result})

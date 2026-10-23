@@ -2419,6 +2419,67 @@ function onConfDate(){
   _confOpen=true;
   renderStoricoConfronto(_confList);
 }
+var _confLast=null;
+var _CONF_NLAB={m_longshot:'Longshot dritti',m_x:'X',m_under:'Under',m_over:'Over',m_btts_no:'BTTS No',m_btts_si:'BTTS S&igrave;',c_dc:'Doppia chance (contro)',c_swap:'Esito opposto',c_split:'X + opposto'};
+function _confI(Sb, Sn, k){ var n=Sn[k]; if(!n||!n.n){ return null; } var b=Sb[k]; var rn=_storRoi(n); var rb=(b&&b.n)?_storRoi(b):null; return {roi:Math.round(rn), n:n.n, w:n.w, delta:(rb!=null?Math.round(rn-rb):null)}; }
+function _confTag(i){ return (i.roi>=0?'+':'')+i.roi+'% ('+i.w+'/'+i.n+')'; }
+function _confTrendTail(d){ if(d==null){ return ''; } if(d>=3){ return ' <span style="color:#22c55e">&uarr;</span>'; } if(d<=-3){ return ' <span style="color:#f87171">&darr;</span>'; } return ''; }
+// Riassunto a parole generato dai numeri (frontend, gratis, cita sempre ROI/record esatti)
+function _confNarrative(Sb, Sn, nBefore, nNow){
+  function I(k){ return _confI(Sb, Sn, k); }
+  var lines=[];
+  var good=[];
+  ['m_under','m_btts_no','m_over','m_btts_si','m_x'].forEach(function(k){ var i=I(k); if(i && i.roi>=10 && i.n>=3){ good.push({k:k,i:i}); } });
+  good.sort(function(a,b){ return b.i.roi-a.i.roi; });
+  if(good.length){ lines.push('<b>Da seguire</b> (edge diretto): '+good.map(function(g){ return _CONF_NLAB[g.k]+' '+_confTag(g.i)+_confTrendTail(g.i.delta); }).join('; ')+'.'); }
+  var ml=I('m_longshot'), dc=I('c_dc');
+  if(ml || dc){
+    var s='<b>Longshot</b>: ';
+    if(ml && ml.roi<0 && dc && dc.roi>ml.roi+10){ s+='seguirli dritti perde ('+_confTag(ml)+'); ribaltarli a doppia chance va meglio ('+_confTag(dc)+'). Conviene coprirli, non inseguirli.'; }
+    else if(ml && dc){ s+='dritti '+_confTag(ml)+', a doppia chance '+_confTag(dc)+' &mdash; '+(dc.roi>ml.roi?'meglio ribaltarli':'nessuno dei due rende chiaramente')+'.'; }
+    else if(ml){ s+='dritti '+_confTag(ml)+'.'; }
+    else { s+='a doppia chance '+_confTag(dc)+'.'; }
+    lines.push(s);
+  }
+  var moved=[];
+  ['m_longshot','m_x','m_under','m_over','m_btts_no','m_btts_si','c_dc','c_swap','c_split'].forEach(function(k){ var i=I(k); if(i && i.delta!=null && Math.abs(i.delta)>=10){ moved.push({k:k,i:i}); } });
+  moved.sort(function(a,b){ return Math.abs(b.i.delta)-Math.abs(a.i.delta); });
+  if(moved.length){ lines.push('<b>Cambiato</b> con le ultime partite: '+moved.slice(0,3).map(function(m){ return _CONF_NLAB[m.k]+' '+(m.i.delta>=0?'+':'')+m.i.delta+'pt'; }).join(', ')+'.'); }
+  var few=[];
+  ['m_longshot','m_x','m_under','m_over','m_btts_no','m_btts_si'].forEach(function(k){ var i=I(k); if(i && i.n<3){ few.push(_CONF_NLAB[k]); } });
+  if(few.length){ lines.push('<span style="color:#94a3b8">Pochi dati, solo indicativi: '+few.join(', ')+'.</span>'); }
+  if(!lines.length){ lines.push('Ancora nessun segnale netto: i campioni sono piccoli, continua a salvare partite con risultato.'); }
+  return lines.map(function(l){ return '<div style="margin:3px 0">'+l+'</div>'; }).join('');
+}
+// Blocco testo per l'AI (stessi numeri del riassunto, formato discorsivo per il modello)
+function _confBuildLLMText(Sb, Sn, nBefore, nNow, cutLabel){
+  function row(k, lab){ var n=Sn[k]; if(!n||!n.n){ return null; } var b=Sb[k]; var rn=Math.round(_storRoi(n)); var rb=(b&&b.n)?Math.round(_storRoi(b)):null; var pre=(rb!=null)?('prima '+(rb>=0?'+':'')+rb+'% ('+b.w+'/'+b.n+')'):'prima: nessun dato'; var now='ora '+(rn>=0?'+':'')+rn+'% ('+n.w+'/'+n.n+')'; var tr=(rb!=null)?(', trend '+((rn-rb)>=0?'+':'')+Math.round(rn-rb)+'pt'):''; return '- '+lab+': '+pre+' -> '+now+tr; }
+  var M=[['m_longshot','Longshot (esiti 1/2 a quota lunga, puntati dritti)'],['m_x','X pareggio'],['m_under','Under'],['m_over','Over'],['m_btts_no','BTTS No'],['m_btts_si','BTTS Si']];
+  var C=[['c_dc','Doppia chance (copri gli altri due esiti)'],['c_swap','Esito opposto secco'],['c_split','Meta stake su X + meta sull esito opposto']];
+  var mL=M.map(function(x){ return row(x[0],x[1]); }).filter(Boolean);
+  var cL=C.map(function(x){ return row(x[0],x[1]); }).filter(Boolean);
+  var t='Confronto strategie scommesse sul primo gol (entro il 16\'). ';
+  t+='Partite con risultato: '+nBefore+' fino al '+cutLabel+', '+nNow+' ora in totale. ';
+  t+='Per ogni strategia: ROI e record (vinte/totali) PRIMA (fino al taglio) e ORA (tutte), con variazione in punti di ROI.\n\n';
+  t+='MERCATO DRITTO (punti il mercato segnalato a edge alto):\n'+(mL.length?mL.join('\n'):'- nessun dato')+'\n\n';
+  t+='CONTRO I LONGSHOT (ribalti il flag 1/2 quando l\'AI diffida):\n'+(cL.length?cL.join('\n'):'- nessun dato');
+  return t;
+}
+async function askConfrontoWords(){
+  var box=document.getElementById('conf-llm-box'); if(!box){ return; }
+  box.style.display='block';
+  if(!_confLast || !_confLast.text){ box.innerHTML='<div style="color:#f59e0b;font-size:13px">Apri prima il confronto.</div>'; return; }
+  box.innerHTML='<div style="color:#94a3b8;font-size:13px">&#x1F9E0; Sto analizzando il confronto con l&#39;AI... (qualche secondo)</div>';
+  try{
+    var r=await fetch('/api/confronto-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:_confLast.text})});
+    var d=await r.json();
+    if(d.error){ box.innerHTML='<div style="color:#f59e0b;font-size:13px;line-height:1.5">'+d.error+'</div>'; return; }
+    var a=d.analysis||{};
+    var safe=(a.text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    var meta=a.model?('<div style="margin-top:10px;font-size:11px;color:#64748b;border-top:1px solid #3b2d5f;padding-top:6px">Modello: '+a.model+((a.in_tokens!=null&&a.out_tokens!=null)?(' &middot; '+a.in_tokens+' in / '+a.out_tokens+' out'):'')+'</div>'):'';
+    box.innerHTML='<div style="line-height:1.6;color:#e9e3f7;font-size:13.5px">'+safe+'</div>'+meta;
+  }catch(e){ box.innerHTML='<div style="color:#f87171;font-size:13px">Errore: '+e.message+'</div>'; }
+}
 function renderStoricoConfronto(list){
   var host=document.getElementById('storico-confronto');
   if(!host){ return; }
@@ -2444,6 +2505,9 @@ function renderStoricoConfronto(list){
   var Sb=_computeStrategies(before), Sn=_computeStrategies(sorted);
   var mRows=_CONF_STRAT.filter(function(s){ return s.g==='m'; }).map(function(s){ return _confRow(s,Sb,Sn); }).join('');
   var cRows=_CONF_STRAT.filter(function(s){ return s.g==='c'; }).map(function(s){ return _confRow(s,Sb,Sn); }).join('');
+  var cutLabel=_confLabel(cut);
+  var narr=_confNarrative(Sb, Sn, before.length, sorted.length);
+  _confLast={text:_confBuildLLMText(Sb, Sn, before.length, sorted.length, cutLabel)};
   var bodyDisp=_confOpen?'block':'none', chev=_confOpen?'&#x25BC;':'&#x25B6;';
   var dmin=_confDateStr(minTs), dmax=_confDateStr(maxTs);
   var head='<div style="display:flex;padding:2px 6px 4px"><span style="flex:1;font-size:10px;color:#64748b">STRATEGIA</span>'
@@ -2466,6 +2530,15 @@ function renderStoricoConfronto(list){
       +head+mRows
       +'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;color:#64748b;margin:14px 0 0;padding:0 6px">CONTRO I LONGSHOT (ribalti il flag 1/2)</div>'
       +cRows
+      +'<div style="margin-top:14px;background:#0b1324;border:0.5px solid #1e293b;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#cbd5e1;line-height:1.5">'
+        +'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;color:#60a5fa;margin-bottom:5px">IN BREVE</div>'
+        +narr
+      +'</div>'
+      +'<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+        +'<button onclick="askConfrontoWords()" style="padding:8px 16px;background:#a855f7;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">&#x1F9E0; Approfondisci con l&#39;AI</button>'
+        +'<span style="font-size:11px;color:#64748b">Analisi discorsiva del confronto (Sonnet, ~1 cent a click).</span>'
+      +'</div>'
+      +'<div id="conf-llm-box" style="display:none;margin-top:10px;background:#140f24;border:1px solid #3b2d5f;border-left:3px solid #a855f7;border-radius:8px;padding:12px 14px"></div>'
       +'<div style="font-size:11px;color:#64748b;margin-top:12px;line-height:1.6">'
         +'<b>Prima</b> = partite salvate fino al giorno scelto; <b>Ora</b> = tutte. Il <b>trend</b> dice come &egrave; cambiato il ROI aggiungendo le partite pi&ugrave; recenti (&#x2191; migliora, &#x2193; peggiora, &rarr; stabile). La scelta del giorno resta in memoria.'
       +'</div>'
