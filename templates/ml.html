@@ -2153,7 +2153,8 @@ function _storWin(mk, h, a){
 }
 function _storFam(mk){
   if(mk.indexOf('dc_')===0){ return 'Doppia chance'; }
-  if(mk==='1'||mk==='2'||mk==='X'){ return 'Longshot'; }
+  if(mk==='1'||mk==='2'){ return 'Longshot'; }
+  if(mk==='X'){ return 'X (pareggio)'; }
   if(mk==='btts_si'){ return 'BTTS Si'; }
   if(mk==='btts_no'){ return 'BTTS No'; }
   if(mk.indexOf('over_')===0){ return 'Over'; }
@@ -2250,7 +2251,7 @@ function renderStoricoSintesi(list, forceOpen){
   if(!host){ return; }
   _storList=list||[];
   var contro=(_storMode!=='mercato');
-  var FAM=(_storMode==='mercato')?['Longshot','Under','Over','BTTS Si','BTTS No']
+  var FAM=(_storMode==='mercato')?['Longshot','X (pareggio)','Under','Over','BTTS Si','BTTS No']
          :(_storMode==='dc')?['Doppia chance','Over','Under','BTTS Si','BTTS No']
          :(_storMode==='swap')?['Esito opposto','Over','Under','BTTS Si','BTTS No']
          :['X + opposto','Over','Under','BTTS Si','BTTS No'];
