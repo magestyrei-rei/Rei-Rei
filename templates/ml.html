@@ -329,6 +329,7 @@
       <button onclick="loadStorico()" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:6px;cursor:pointer">&#x21BB; aggiorna</button>
     </div>
     <div id="storico-sintesi" style="margin-bottom:14px"></div>
+    <div id="storico-confronto" style="margin-bottom:14px"></div>
     <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
   </section>
 
@@ -2065,6 +2066,7 @@ async function loadStorico(){
     if(d.error){ el.innerHTML='<div style="color:#f87171">'+d.error+'</div>'; return; }
     var list=d.saved||[];
     renderStoricoSintesi(list);
+    renderStoricoConfronto(list);
     if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
     el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
   }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
@@ -2330,6 +2332,143 @@ function renderStoricoSintesi(list, forceOpen){
       +'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;color:#64748b;margin:16px 0 2px">PER CAMPIONATO</div>'
       +lgHtml
       +'<div style="font-size:11px;color:#64748b;margin-top:10px;line-height:1.6">'+note+' &middot; <span style="color:#f59e0b">&#x26A0;</span> pochi dati (meno di 3): ROI indicativo &middot; &mdash; = nessuna segnalazione</div>'
+    +'</div>'
+    +'</div>';
+}
+
+// --- Confronto nel tempo: "prima vs ora" per strategia, dai dati salvati ---
+// Calcola w/n/ret per ogni strategia (mercato dritto + contro longshot), riusando
+// la stessa matematica della Sintesi. Ritorna un oggetto {chiave:{w,n,ret}}.
+function _computeStrategies(list){
+  var S={m_longshot:{w:0,n:0,ret:0}, m_x:{w:0,n:0,ret:0}, m_under:{w:0,n:0,ret:0},
+         m_over:{w:0,n:0,ret:0}, m_btts_no:{w:0,n:0,ret:0}, m_btts_si:{w:0,n:0,ret:0},
+         c_dc:{w:0,n:0,ret:0}, c_swap:{w:0,n:0,ret:0}, c_split:{w:0,n:0,ret:0}};
+  var FKEY={'Longshot':'m_longshot','X (pareggio)':'m_x','Under':'m_under','Over':'m_over','BTTS No':'m_btts_no','BTTS Si':'m_btts_si'};
+  (list||[]).forEach(function(s){
+    var sc=_storScore(s.result); if(!sc){ return; }
+    (s.flagged||[]).forEach(function(f){
+      var mk=f.market; var q=parseFloat(f.quota); if(!q||q<=1){ return; }
+      var br=(f.base_rate!=null?parseFloat(f.base_rate):null);
+      // mercato dritto: punti il flag cosi' com'e'
+      var wd=_storWin(mk, sc.h, sc.a);
+      if(wd!==null){
+        var k=FKEY[_storFam(mk)];
+        if(k){ var D=S[k]; D.n++; D.ret+=(wd?q:0); if(wd){ D.w++; } }
+      }
+      // contro: solo sui longshot 1/2
+      if(mk==='1'||mk==='2'){
+        var dc=_oppInfo(mk, q, br, s, 'dc');
+        if(dc){ var wdc=_storWinOpp(mk, sc.h, sc.a); if(wdc!==null){ var C=S.c_dc; C.n++; C.ret+=(wdc?dc.quota:0); if(wdc){ C.w++; } } }
+        var sw=_oppInfo(mk, q, br, s, 'swap');
+        if(sw){ var wsw=_storWin(sw.market, sc.h, sc.a); if(wsw!==null){ var W=S.c_swap; W.n++; W.ret+=(wsw?sw.quota:0); if(wsw){ W.w++; } } }
+        var sp=_splitXopp(mk, s, sc.h, sc.a);
+        if(sp){ var P=S.c_split; P.n++; P.ret+=sp.ret; if(sp.covered){ P.w++; } }
+      }
+    });
+  });
+  return S;
+}
+function _confDateStr(ts){ var d=new Date(ts*1000); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function _confDayEnd(str){ var p=(str||'').split('-'); if(p.length!==3){ return 0; } return Math.floor(new Date(+p[0],+p[1]-1,+p[2],23,59,59).getTime()/1000); }
+function _confLabel(ts){ var M=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic']; var d=new Date(ts*1000); return d.getDate()+' '+M[d.getMonth()]; }
+var _confList=[], _confOpen=false;
+var _CONF_STRAT=[
+  {k:'m_longshot', l:'Longshot (1/2) &mdash; dritto', g:'m'},
+  {k:'m_x',        l:'X pareggio &mdash; dritto',     g:'m'},
+  {k:'m_under',    l:'Under',                         g:'m'},
+  {k:'m_over',     l:'Over',                          g:'m'},
+  {k:'m_btts_no',  l:'BTTS No',                       g:'m'},
+  {k:'m_btts_si',  l:'BTTS S&igrave;',                g:'m'},
+  {k:'c_dc',       l:'Doppia chance',                 g:'c'},
+  {k:'c_swap',     l:'Esito opposto secco',           g:'c'},
+  {k:'c_split',    l:'X + opposto',                   g:'c'}
+];
+function _confCell(c){
+  if(!c||!c.n){ return '<div style="width:72px;text-align:center;color:#475569"><div style="font-size:12.5px">&mdash;</div><div style="font-size:10px">&nbsp;</div></div>'; }
+  var roi=Math.round(_storRoi(c)), pos=roi>=0;
+  return '<div style="width:72px;text-align:center">'
+    +'<div style="font-size:12.5px;font-weight:600;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%</div>'
+    +'<div style="font-size:10px;color:#64748b">'+c.w+'/'+c.n+'</div></div>';
+}
+function _confRow(st, Sb, Sn){
+  var b=Sb[st.k], n=Sn[st.k];
+  var rb=b.n?_storRoi(b):null, rn=n.n?_storRoi(n):null;
+  var arrow='&rarr;', tcol='#64748b', ttxt='';
+  if(rb!=null && rn!=null){
+    var d=rn-rb;
+    if(d>3){ arrow='&#x2191;'; tcol='#22c55e'; } else if(d<-3){ arrow='&#x2193;'; tcol='#f87171'; }
+    ttxt=(d>=0?'+':'')+Math.round(d)+'pt';
+  } else if(rb==null && rn!=null){ arrow='&#x2726;'; tcol='#60a5fa'; ttxt='nuovo'; }
+  else { arrow='&mdash;'; }
+  return '<div style="display:flex;align-items:center;padding:4px 6px;border-top:0.5px solid #1e293b">'
+    +'<span style="flex:1;font-size:12px;color:#e2e8f0;min-width:0">'+st.l+'</span>'
+    +_confCell(b)+_confCell(n)
+    +'<div style="width:62px;text-align:right;color:'+tcol+'"><div style="font-size:13px;line-height:1">'+arrow+'</div><div style="font-size:9.5px">'+ttxt+'</div></div>'
+    +'</div>';
+}
+function toggleConfronto(){
+  var b=document.getElementById('conf-body'), c=document.getElementById('conf-chev');
+  if(!b){ return; }
+  _confOpen=(b.style.display==='none');
+  b.style.display=_confOpen?'block':'none';
+  if(c){ c.innerHTML=_confOpen?'&#x25BC;':'&#x25B6;'; }
+}
+function onConfDate(){
+  var el=document.getElementById('conf-date'); if(!el){ return; }
+  var v=el.value; if(v){ try{ localStorage.setItem('storConfCutoff', v); }catch(e){} }
+  _confOpen=true;
+  renderStoricoConfronto(_confList);
+}
+function renderStoricoConfronto(list){
+  var host=document.getElementById('storico-confronto');
+  if(!host){ return; }
+  _confList=list||[];
+  var withRes=(list||[]).filter(function(s){ return _storScore(s.result) && s.ts; });
+  if(withRes.length<4){
+    host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;background:#0f172a;padding:10px 14px;font-size:12px;color:#64748b">&#x1F4C8; <b>Confronto nel tempo</b>: servono almeno ~4 partite con <b>risultato</b> inserito per paragonare due periodi (ora ne hai '+withRes.length+').</div>';
+    return;
+  }
+  var sorted=withRes.slice().sort(function(a,b){ return a.ts-b.ts; });
+  var minTs=sorted[0].ts, maxTs=sorted[sorted.length-1].ts;
+  if(_confDateStr(minTs)===_confDateStr(maxTs)){
+    host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;background:#0f172a;padding:10px 14px;font-size:12px;color:#64748b">&#x1F4C8; <b>Confronto nel tempo</b>: tutte le partite salvate sono dello stesso giorno. Torna quando avrai partite di giorni diversi per vedere come cambia il quadro.</div>';
+    return;
+  }
+  var saved=null; try{ saved=localStorage.getItem('storConfCutoff'); }catch(e){}
+  var cutoffStr=saved;
+  if(!cutoffStr || _confDayEnd(cutoffStr)<minTs || _confDayEnd(cutoffStr)>=maxTs){
+    cutoffStr=_confDateStr(sorted[Math.floor(sorted.length/2)-1].ts);
+  }
+  var cut=_confDayEnd(cutoffStr);
+  var before=sorted.filter(function(s){ return s.ts<=cut; });
+  var Sb=_computeStrategies(before), Sn=_computeStrategies(sorted);
+  var mRows=_CONF_STRAT.filter(function(s){ return s.g==='m'; }).map(function(s){ return _confRow(s,Sb,Sn); }).join('');
+  var cRows=_CONF_STRAT.filter(function(s){ return s.g==='c'; }).map(function(s){ return _confRow(s,Sb,Sn); }).join('');
+  var bodyDisp=_confOpen?'block':'none', chev=_confOpen?'&#x25BC;':'&#x25B6;';
+  var dmin=_confDateStr(minTs), dmax=_confDateStr(maxTs);
+  var head='<div style="display:flex;padding:2px 6px 4px"><span style="flex:1;font-size:10px;color:#64748b">STRATEGIA</span>'
+    +'<span style="width:72px;text-align:center;font-size:10px;color:#64748b">FINO AL '+_confLabel(cut).toUpperCase()+'<br><span style="font-size:9px">'+before.length+' part.</span></span>'
+    +'<span style="width:72px;text-align:center;font-size:10px;color:#64748b">ORA (TUTTE)<br><span style="font-size:9px">'+sorted.length+' part.</span></span>'
+    +'<span style="width:62px;text-align:right;font-size:10px;color:#64748b">TREND</span></div>';
+  host.innerHTML=
+    '<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
+    +'<div onclick="toggleConfronto()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
+      +'<span style="font-size:16px">&#x1F4C8;</span>'
+      +'<span style="font-size:14px;font-weight:600;color:#e2e8f0">Confronto nel tempo</span>'
+      +'<span style="font-size:11px;color:#64748b">prima vs ora</span>'
+      +'<span id="conf-chev" style="margin-left:auto;color:#94a3b8">'+chev+'</span>'
+    +'</div>'
+    +'<div id="conf-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'
+      +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 10px">'
+        +'<span style="font-size:12px;color:#94a3b8">Dividi al giorno:</span>'
+        +'<input type="date" id="conf-date" value="'+cutoffStr+'" min="'+dmin+'" max="'+dmax+'" onchange="onConfDate()" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:7px;padding:5px 8px;font-size:12.5px;color-scheme:dark">'
+      +'</div>'
+      +head+mRows
+      +'<div style="font-size:11px;font-weight:600;letter-spacing:.04em;color:#64748b;margin:14px 0 0;padding:0 6px">CONTRO I LONGSHOT (ribalti il flag 1/2)</div>'
+      +cRows
+      +'<div style="font-size:11px;color:#64748b;margin-top:12px;line-height:1.6">'
+        +'<b>Prima</b> = partite salvate fino al giorno scelto; <b>Ora</b> = tutte. Il <b>trend</b> dice come &egrave; cambiato il ROI aggiungendo le partite pi&ugrave; recenti (&#x2191; migliora, &#x2193; peggiora, &rarr; stabile). La scelta del giorno resta in memoria.'
+      +'</div>'
     +'</div>'
     +'</div>';
 }
