@@ -1319,7 +1319,8 @@ def _settle_user_bets(limit=80):
 _LIVE_EG = {'ts': 0, 'matches': []}   # cache in-memory per il tab Match in Play
 _LAST_TICK_TS = time.time()           # ultimo tick del cron ESTERNO (/api/live-earlygoal-tick); lo legge il watchdog
 _SCANNER_CACHE = {}   # cache scanner nicchie: (minute, market) -> (ts, full_rows)
-_LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (fisso, cache)
+_LIVE_FG = {}                          # fixture_id -> minuto del 1o gol (999 = non-early). Cache in RAM.
+_LIVE_FG_LOADED = False                # True dopo il primo load da Turso (persistenza cross-restart)
 
 DDL_LIVE_SEEN = """
 CREATE TABLE IF NOT EXISTS live_alert_seen (
@@ -1327,6 +1328,50 @@ CREATE TABLE IF NOT EXISTS live_alert_seen (
   ts INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
 )
 """.strip()
+
+# Persistenza su Turso della cache "minuto del 1o gol" (tabellina minuscola, si
+# auto-pulisce): cosi' un riavvio di Render non costringe a ri-chiedere gli eventi
+# gia' noti. Tutto best-effort: se Turso non risponde, si prosegue con la sola RAM.
+DDL_LIVE_FG = """
+CREATE TABLE IF NOT EXISTS live_fg_cache (
+  fixture_id INTEGER PRIMARY KEY,
+  fgm        INTEGER NOT NULL,
+  ts         INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+)
+""".strip()
+
+def _live_fg_load():
+    """Carica in RAM la cache del 1o gol da Turso (una volta per processo) e pota
+    le righe piu' vecchie di 3 giorni. Degrada in silenzio alla sola RAM se Turso
+    non e' raggiungibile."""
+    global _LIVE_FG_LOADED
+    if _LIVE_FG_LOADED:
+        return
+    _LIVE_FG_LOADED = True
+    try:
+        _turso_execute(DDL_LIVE_FG)
+        cutoff = int(time.time()) - 3 * 86400
+        try:
+            _turso_execute("DELETE FROM live_fg_cache WHERE ts < ?", [cutoff])
+        except Exception:
+            pass
+        rows = _turso_select_rows("SELECT fixture_id, fgm FROM live_fg_cache WHERE ts >= ?", [cutoff])
+        for r in (rows or []):
+            try:
+                _LIVE_FG[int(r['fixture_id'])] = int(r['fgm'])
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+def _live_fg_remember(fid, fgm):
+    """Memorizza il minuto del 1o gol (o 999 = non-early) in RAM e, best-effort, su Turso."""
+    _LIVE_FG[fid] = fgm
+    try:
+        _turso_execute("INSERT OR REPLACE INTO live_fg_cache (fixture_id, fgm, ts) VALUES (?, ?, ?)",
+                       [int(fid), int(fgm), int(time.time())])
+    except Exception:
+        pass
 
 def _monitored_leagues():
     try:
@@ -1362,6 +1407,7 @@ def _send_telegram(text):
         return False
 
 def _refresh_live_eg(send_telegram=False):
+    _live_fg_load()   # ricarica la cache del 1o gol da Turso (una volta per processo)
     monitored = _monitored_leagues()
     resp = (_af_get('/fixtures', {'live': 'all'}) or {}).get('response') or []
     out = []
@@ -1377,6 +1423,7 @@ def _refresh_live_eg(send_telegram=False):
         fid = (f.get('fixture') or {}).get('id')
         if fid is None:
             continue
+        elapsed = ((f.get('fixture') or {}).get('status') or {}).get('elapsed') or 0
         fgm = _LIVE_FG.get(fid)
         if fgm is None:
             ev = (_af_get('/fixtures/events', {'fixture': fid}) or {}).get('response') or []
@@ -1384,9 +1431,17 @@ def _refresh_live_eg(send_telegram=False):
                     for e in ev if (e.get('type') or '') == 'Goal']
             if mins:
                 fgm = min(mins)
-                _LIVE_FG[fid] = fgm   # cache solo il minuto reale
+                _live_fg_remember(fid, fgm)   # minuto reale del 1o gol: cache definitiva (RAM + Turso)
             else:
-                fgm = 999             # eventi non ancora disponibili: NON cachare, ricontrolla al prossimo tick
+                # Eventi non ancora disponibili. Se la partita e' ancora "giovane"
+                # (<=25') puo' essere un gol early con eventi in ritardo: riproviamo
+                # al prossimo tick. Oltre il 25' senza eventi, il 1o gol NON e' entro
+                # il 16' (o la lega non ha copertura eventi): cache definitiva a 999,
+                # cosi' NON la ri-chiediamo a ogni giro -> taglio grosso delle richieste
+                # /fixtures/events (prima venivano rifatte ogni 5 min per tutto il match).
+                fgm = 999
+                if elapsed > 25:
+                    _live_fg_remember(fid, 999)
         if fgm > 16:
             continue
         teams = f.get('teams') or {}
