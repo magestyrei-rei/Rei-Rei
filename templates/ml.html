@@ -316,8 +316,9 @@
     </div>
     <div id="an-llm-box" style="display:none;margin-top:12px;background:#140f24;border:1px solid #3b2d5f;border-left:3px solid #a855f7;border-radius:8px;padding:14px 16px"></div>
     <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid #1e293b;padding-top:12px">
+      <span id="an-book-sel" style="display:inline-flex;align-items:center"></span>
       <button onclick="saveAnalisi()" style="padding:9px 18px;background:#15803d;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">&#x1F4BE; Salva nello storico</button>
-      <span style="font-size:11px;color:#64748b">Salva partita + quote + lettura. Premi dopo <b>Analisi a parole</b>. Le rivedi nel tab <b>&#x1F4C1; Storico salvato</b>.</span>
+      <span style="font-size:11px;color:#64748b">Salva partita + quote + lettura <b>sul book scelto</b>. Premi dopo <b>Analisi a parole</b>. Le rivedi nel tab <b>&#x1F4C1; Storico salvato</b>.</span>
     </div>
     <div id="an-save-status" style="display:none;margin-top:8px;font-size:12.5px;color:#cbd5e1"></div>
   </section>
@@ -328,6 +329,7 @@
       <div style="font-size:12.5px;color:#cbd5e1;flex:1;min-width:240px">&#x1F4C1; <b>Storico salvato</b> &mdash; le partite salvate da Analisi Live (partita, quote, lettura AI, mercati a edge alto). Scrivi il <b>risultato</b> dopo la partita per chiudere il cerchio.</div>
       <button onclick="loadStorico()" style="padding:6px 12px;background:#0e7490;color:#fff;border:none;border-radius:6px;cursor:pointer">&#x21BB; aggiorna</button>
     </div>
+    <div id="storico-bookbar" style="margin-bottom:12px"></div>
     <div id="storico-sintesi" style="margin-bottom:14px"></div>
     <div id="storico-confronto" style="margin-bottom:14px"></div>
     <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
@@ -1781,6 +1783,7 @@ async function loadAnalisiInit(){
       arr.forEach(function(lg){var o=document.createElement('option');o.value=lg.id;o.textContent=lg.name;sel.appendChild(o);});
     }catch(e){}
   }
+  renderAnBook();
   loadAnalisiLive();
 }
 async function loadAnalisiLive(){
@@ -2021,6 +2024,17 @@ async function onOddsScreens(input){
 
 // === Storico salvato (salva analisi + rivedi + risultato) ===
 function _escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// Book su cui l'utente prende le quote da salvare nello storico (Betfair finche'
+// attivo, poi Betflag). Default Betfair, scelta ricordata (localStorage).
+var _anBook='Betfair';
+try{ var _bk0=localStorage.getItem('anBook'); if(_bk0==='Betfair'||_bk0==='Betflag'){ _anBook=_bk0; } }catch(e){}
+function renderAnBook(){
+  var host=document.getElementById('an-book-sel'); if(!host){ return; }
+  function b(name){ var on=_anBook===name; return '<button onclick="setAnBook(&#39;'+name+'&#39;)" style="padding:7px 13px;border:none;cursor:pointer;font-size:12.5px;font-weight:600;background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#94a3b8')+'">'+name+'</button>'; }
+  host.innerHTML='<span style="font-size:12px;color:#94a3b8;margin-right:6px">Book:</span>'
+    +'<span style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden">'+b('Betfair')+b('Betflag')+'</span>';
+}
+function setAnBook(name){ _anBook=(name==='Betflag')?'Betflag':'Betfair'; try{ localStorage.setItem('anBook', _anBook); }catch(e){} renderAnBook(); }
 async function saveAnalisi(){
   var status=document.getElementById('an-save-status');
   status.style.display='block';
@@ -2048,31 +2062,59 @@ async function saveAnalisi(){
     state:_anLastBoard.state, fgm:_anLastBoard.fgm, minute:_anLastBoard.minute, first_team:(_anLastBoard.first_team||null),
     board:{ header:{league:_anLastBoard.league,state:_anLastBoard.state,minute:_anLastBoard.minute,bucket:_anLastBoard.bucket,n_state:_anLastBoard.n_state,rimonte:_anLastBoard.rimonte}, rows:rows, ocr:_anOcrAll },
     flagged:flagged,
-    analysis_text:analysisText
+    analysis_text:analysisText,
+    book:_anBook
   };
   status.innerHTML='Salvo...';
   try{
     var r=await fetch('/api/save-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     var d=await r.json();
     if(d.error){ status.innerHTML='<span style="color:#f87171">'+d.error+'</span>'; return; }
-    status.innerHTML='&#x2705; Salvata nello <b>Storico salvato</b>'+(flagged.length?(' &middot; '+flagged.length+' mercato/i a edge alto flaggato/i'):'')+(analysisText?'':' <span style="color:#f59e0b">(senza lettura AI: conviene fare prima Analisi a parole)</span>')+'.';
+    status.innerHTML='&#x2705; Salvata su <b>'+_anBook+'</b> nello <b>Storico salvato</b>'+(flagged.length?(' &middot; '+flagged.length+' mercato/i a edge alto flaggato/i'):'')+(analysisText?'':' <span style="color:#f59e0b">(senza lettura AI: conviene fare prima Analisi a parole)</span>')+'.';
   }catch(e){ status.innerHTML='<span style="color:#f87171">Errore: '+e.message+'</span>'; }
 }
+// --- Filtro per book nello Storico (Betfair / Betflag) ---
+// Tiene separate le due fonti: ROI e record non vanno mai mescolati fra book diversi.
+var _storAllList=[], _storBook='all';
+function _storByBook(list){ if(_storBook==='all'){ return list||[]; } return (list||[]).filter(function(s){ return (s.book||'Betfair')===_storBook; }); }
+function renderStoricoBookBar(){
+  var host=document.getElementById('storico-bookbar'); if(!host){ return; }
+  if(!_storAllList.length){ host.innerHTML=''; return; }
+  var nFL=0; _storAllList.forEach(function(s){ if((s.book||'Betfair')==='Betflag'){ nFL++; } });
+  var nBF=_storAllList.length-nFL;
+  function b(val,label,cnt){ var on=_storBook===val; return '<button onclick="setStorBook(&#39;'+val+'&#39;)" style="padding:6px 13px;border:none;cursor:pointer;font-size:12.5px;font-weight:600;background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#94a3b8')+'">'+label+' ('+cnt+')</button>'; }
+  host.innerHTML='<div style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    +'<span style="font-size:12px;color:#94a3b8">Book:</span>'
+    +'<span style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden">'+b('all','Tutti',_storAllList.length)+b('Betfair','Betfair',nBF)+b('Betflag','Betflag',nFL)+'</span>'
+    +'<span style="font-size:11px;color:#64748b">Quote e liquidit&agrave; diverse per book: non mescolarli nei conti, filtra per leggere il ROI di ciascuno.</span>'
+    +'</div>';
+}
+function renderStoricoCards(list){
+  var el=document.getElementById('storico-list');
+  if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata per questo book.</div>'; return; }
+  el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
+}
+function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoCards(fl); }
 async function loadStorico(){
   var el=document.getElementById('storico-list');
   el.innerHTML='<div style="color:#64748b;font-size:13px">Carico...</div>';
   try{
     var r=await fetch('/api/saved-analyses');var d=await r.json();
     if(d.error){ el.innerHTML='<div style="color:#f87171">'+d.error+'</div>'; return; }
-    var list=d.saved||[];
-    renderStoricoSintesi(list);
-    renderStoricoConfronto(list);
-    if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
-    el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
+    _storAllList=d.saved||[];
+    renderStoricoBookBar();
+    var fl=_storByBook(_storAllList);
+    renderStoricoSintesi(fl);
+    renderStoricoConfronto(fl);
+    if(!_storAllList.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
+    renderStoricoCards(fl);
   }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
 }
 function renderSavedCard(s){
   var date=''; try{ date=new Date((s.ts||0)*1000).toLocaleString('it-IT'); }catch(e){}
+  var _bk=(s.book||'Betfair');
+  var _bkc=(_bk==='Betflag')?['#2a1f07','#92610a','#fcd34d']:['#07231f','#0f5132','#6ee7b7'];
+  var bkBadge='<span style="display:inline-block;background:'+_bkc[0]+';border:1px solid '+_bkc[1]+';color:'+_bkc[2]+';border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:600">'+_bk+'</span>';
   var head=(s.teams?('<b>'+_escHtml(s.teams)+'</b> &middot; '):'')+_escHtml(s.league_name||'')+' &middot; stato <b>'+_escHtml(s.state||'?')+'</b> al <b>'+(s.minute||'?')+"'</b>";
   var flaggedHtml='';
   (s.flagged||[]).forEach(function(f){
@@ -2101,7 +2143,7 @@ function renderSavedCard(s){
   var analysisHtml=s.analysis_text?('<details><summary>Lettura AI</summary><div style="margin-top:6px;font-size:12.5px;color:#cbd5e1;line-height:1.55">'+_escHtml(s.analysis_text).replace(/\n/g,'<br>')+'</div></details>'):'';
   var res=(s.result||'');
   return '<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:12px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><div style="font-size:13px;color:#cbd5e1">'+head+'</div><div style="font-size:11px;color:#64748b">'+date+'</div></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><div style="font-size:13px;color:#cbd5e1">'+head+'</div><div style="display:flex;align-items:center;gap:8px">'+bkBadge+'<span style="font-size:11px;color:#64748b">'+date+'</span></div></div>'
     +(flaggedHtml?('<div style="margin-top:6px"><span style="font-size:11px;color:#94a3b8">Edge alto flaggato:</span><br>'+flaggedHtml+'</div>'):'')
     +boardHtml
     +analysisHtml

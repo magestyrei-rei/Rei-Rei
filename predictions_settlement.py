@@ -535,13 +535,18 @@ CREATE TABLE IF NOT EXISTS saved_analyses (
   board_json    TEXT,
   analysis_text TEXT,
   flagged       TEXT,
-  result        TEXT
+  result        TEXT,
+  book          TEXT
 )
 """.strip()
 
 
 def _ensure_saved_ddl():
     _turso_execute(DDL_SAVED)
+    try:
+        _turso_execute("ALTER TABLE saved_analyses ADD COLUMN book TEXT")
+    except Exception:
+        pass  # colonna gia' presente (tabella creata prima del 2026-10-29)
 
 def _bet_market_win(market, fh, fa):
     """Esito di un mercato dato il risultato FT. None se non valutabile."""
@@ -2638,14 +2643,19 @@ def register(app):
             flagged = p.get('flagged')
             board_json = json.dumps(board, ensure_ascii=False) if board is not None else None
             flagged_json = json.dumps(flagged, ensure_ascii=False) if flagged is not None else None
+            # Book da cui arrivano le quote (Betfair finche' attivo, poi Betflag).
+            # Default Betfair: lo storico esistente e' tutto Betfair. Non mescolare le
+            # due fonti nei conteggi ROI -> si filtra per book in Sintesi/Confronto.
+            book = (p.get('book') or '').strip()
+            book = book if book in ('Betfair', 'Betflag') else 'Betfair'
             _turso_execute(
                 "INSERT INTO saved_analyses (ts, fixture_id, league_id, league_name, teams, state, "
-                "fgm, minute, first_team, board_json, analysis_text, flagged, result) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "fgm, minute, first_team, board_json, analysis_text, flagged, result, book) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [int(time.time()), _i(p.get('fixture_id')), _i(p.get('league_id')),
                  (p.get('league_name') or None), (p.get('teams') or None), (p.get('state') or None),
                  _i(p.get('fgm')), _i(p.get('minute')), (p.get('first_team') or None),
-                 board_json, (p.get('analysis_text') or None), flagged_json, (p.get('result') or None)]
+                 board_json, (p.get('analysis_text') or None), flagged_json, (p.get('result') or None), book]
             )
             return jsonify({'ok': True})
         except Exception as e:
@@ -2658,7 +2668,7 @@ def register(app):
             _ensure_saved_ddl()
             rows = _turso_select_rows(
                 "SELECT id, ts, fixture_id, league_id, league_name, teams, state, fgm, minute, "
-                "first_team, board_json, analysis_text, flagged, result "
+                "first_team, board_json, analysis_text, flagged, result, book "
                 "FROM saved_analyses ORDER BY ts DESC, id DESC LIMIT 300")
             for r in rows:
                 for k in ('board_json', 'flagged'):
