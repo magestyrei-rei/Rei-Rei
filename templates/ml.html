@@ -332,6 +332,7 @@
     <div id="storico-bookbar" style="margin-bottom:12px"></div>
     <div id="storico-sintesi" style="margin-bottom:14px"></div>
     <div id="storico-confronto" style="margin-bottom:14px"></div>
+    <div id="storico-fade" style="margin-bottom:14px"></div>
     <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
   </section>
 
@@ -2094,7 +2095,65 @@ function renderStoricoCards(list){
   if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata per questo book.</div>'; return; }
   el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
 }
-function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoCards(fl); }
+function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoFade(fl); renderStoricoCards(fl); }
+// --- Fade per mercato x numero di flag ---
+// Per ogni mercato flaggato: quanto rende FADEARLO (puntare il contrario),
+// spezzato per quanti flag aveva il match. Riusa _oppInfo/_storWin come la Sintesi.
+var _fadeOpen=false;
+var _FADE_FAMS=['Under','Over','BTTS No','BTTS Si','Longshot','X'];
+function _fadeFam(mk){ if(mk.indexOf('under_')===0)return 'Under'; if(mk.indexOf('over_')===0)return 'Over'; if(mk==='btts_no')return 'BTTS No'; if(mk==='btts_si')return 'BTTS Si'; if(mk==='1'||mk==='2')return 'Longshot'; if(mk==='X')return 'X'; return null; }
+function _fadeByFlagCount(list){
+  var M={}; _FADE_FAMS.forEach(function(f){ M[f]={}; ['1','2','3','4+','tot'].forEach(function(b){ M[f][b]={w:0,n:0,ret:0}; }); });
+  (list||[]).forEach(function(s){
+    var sc=_storScore(s.result); if(!sc) return;
+    var flags=s.flagged||[]; if(!flags.length) return;
+    var k=0; flags.forEach(function(f){ if(_storWin(f.market,sc.h,sc.a)!==null) k++; });
+    if(k<1) return;
+    var bk=(k>=4)?'4+':(''+k);
+    flags.forEach(function(f){
+      var fm=_fadeFam(f.market); if(!fm) return;
+      var q=parseFloat(f.quota); if(!q||q<=1) return;
+      var opp=_oppInfo(f.market,q,(f.base_rate!=null?parseFloat(f.base_rate):null),s,'dc'); if(!opp) return;
+      var win=(opp.market.indexOf('dc_')===0)?_storWinOpp(f.market,sc.h,sc.a):_storWin(opp.market,sc.h,sc.a);
+      if(win===null) return;
+      [bk,'tot'].forEach(function(b){ var c=M[fm][b]; c.n++; if(win){c.w++; c.ret+=opp.quota;} });
+    });
+  });
+  return M;
+}
+function _fadeCell(c, bl){
+  var st='text-align:center;padding:4px 6px'+(bl?';border-left:0.5px solid #1e293b':'');
+  if(!c||!c.n){ return '<td style="'+st+';color:#475569">&mdash;</td>'; }
+  var roi=Math.round((c.ret-c.n)/c.n*100), pos=roi>=0;
+  var warn=c.n<3?' <span style="color:#f59e0b;font-size:9px">&#x26A0;</span>':'';
+  return '<td style="'+st+'"><div style="font-size:12px;font-weight:600;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%'+warn+'</div><div style="font-size:9.5px;color:#64748b">'+c.w+'/'+c.n+'</div></td>';
+}
+function toggleFade(){ var b=document.getElementById('fade-body'),c=document.getElementById('fade-chev'); if(!b)return; _fadeOpen=(b.style.display==='none'); b.style.display=_fadeOpen?'block':'none'; if(c)c.innerHTML=_fadeOpen?'&#x25BC;':'&#x25B6;'; }
+function renderStoricoFade(list){
+  var host=document.getElementById('storico-fade'); if(!host) return;
+  var M=_fadeByFlagCount(list);
+  var fams=_FADE_FAMS.filter(function(f){ return M[f].tot.n>0; });
+  if(!fams.length){ host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;background:#0f172a;padding:10px 14px;font-size:12px;color:#64748b">&#x1F3AF; <b>Fade per mercato</b>: comparir&agrave; quando avrai partite con <b>risultato</b> e mercati flaggati.</div>'; return; }
+  var LAB={'Under':'Fade Under &rarr;Over','Over':'Fade Over &rarr;Under','BTTS No':'Fade BTTS No &rarr;S&igrave;','BTTS Si':'Fade BTTS S&igrave; &rarr;No','Longshot':'Fade Longshot &rarr;doppia ch.','X':'Fade X &rarr;1 o 2'};
+  var head='<tr style="color:#94a3b8;font-size:10px"><th style="text-align:left;padding:4px 8px">MERCATO (fade)</th><th style="padding:4px 6px">1 flag</th><th style="padding:4px 6px">2 flag</th><th style="padding:4px 6px">3 flag</th><th style="padding:4px 6px">4+ flag</th><th style="padding:4px 6px;border-left:0.5px solid #1e293b">TUTTI</th></tr>';
+  var rows=fams.map(function(f){
+    return '<tr style="border-top:0.5px solid #1e293b"><td style="padding:4px 8px;font-size:11.5px;color:#e2e8f0;white-space:nowrap">'+LAB[f]+'</td>'
+      +_fadeCell(M[f]['1'])+_fadeCell(M[f]['2'])+_fadeCell(M[f]['3'])+_fadeCell(M[f]['4+'])+_fadeCell(M[f].tot,true)+'</tr>';
+  }).join('');
+  var bodyDisp=_fadeOpen?'block':'none', chev=_fadeOpen?'&#x25BC;':'&#x25B6;';
+  host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
+    +'<div onclick="toggleFade()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
+      +'<span style="font-size:16px">&#x1F3AF;</span>'
+      +'<span style="font-size:14px;font-weight:600;color:#e2e8f0">Fade per mercato &times; n&deg; flag</span>'
+      +'<span style="font-size:11px;color:#64748b">quanto rende andargli contro</span>'
+      +'<span id="fade-chev" style="margin-left:auto;color:#94a3b8">'+chev+'</span>'
+    +'</div>'
+    +'<div id="fade-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:430px"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div style="font-size:11px;color:#64748b;margin-top:10px;line-height:1.6">ROI di <b>fadeare</b> (puntare il contrario) ogni mercato flaggato, diviso per <b>quanti flag</b> aveva il match. Es.: <i>Fade Under a 4+ flag</i> = quando l&#39;Under era segnalato in una partita con 4+ flag, puntare Over ha reso quel %. <span style="color:#f59e0b">&#x26A0;</span> = meno di 3 casi (solo indicativo). Rispetta il filtro Book qui sopra.</div>'
+    +'</div>'
+  +'</div>';
+}
 async function loadStorico(){
   var el=document.getElementById('storico-list');
   el.innerHTML='<div style="color:#64748b;font-size:13px">Carico...</div>';
@@ -2106,6 +2165,7 @@ async function loadStorico(){
     var fl=_storByBook(_storAllList);
     renderStoricoSintesi(fl);
     renderStoricoConfronto(fl);
+    renderStoricoFade(fl);
     if(!_storAllList.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
     renderStoricoCards(fl);
   }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
