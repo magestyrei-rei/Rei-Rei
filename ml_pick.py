@@ -25,7 +25,8 @@ _ODDS_TTL = 30           # secondi - quote live si muovono veloci
 _LIVE_FIX_CACHE = {'ts': 0, 'data': None}
 _LIVE_FIX_TTL = 45       # secondi
 _EVENTS_CACHE = {}  # {fixture_id: (ts, first_goal_minute_or_None)}
-_EVENTS_TTL = 120  # secondi - gli eventi goal non cambiano retroattivamente
+_EVENTS_TTL_FOUND = 6 * 3600   # minuto del 1o gol GIA' noto: non cambia mai -> cache lunga
+_EVENTS_TTL_NONE = 150         # ancora nessun gol/eventi: riprova presto
 
 # Background cache per predizioni live (aggiornato ogni 5 min dal thread daemon)
 _SERVER_PRED_CACHE = {'fixtures': [], 'pick_cache': {}, 'last_update': 0}
@@ -70,23 +71,29 @@ def _get_live_fixtures_af():
 
 
 def _get_first_goal_minute(fixture_id):
-    """Ritorna il minuto del primo gol.
-    Priorita': 1) app.live_tracking (gia' popolato dal polling, 0 API calls extra)
-               2) _EVENTS_CACHE locale  3) API events come fallback."""
-    # 1) Live tracking di app.py: il polling aggiorna ogni minuto senza costi API
+    """Ritorna il minuto del primo gol. Il minuto NON cambia una volta segnato, quindi:
+    1) cache CONDIVISA e PERSISTENTE del tick early-goal (predictions_settlement._LIVE_FG,
+       su Turso): 0 chiamate extra, sopravvive ai riavvii;
+    2) cache locale con TTL lungo se il gol e' gia' noto, corto se ancora None;
+    3) API events solo come ultimo fallback.
+    (Prima la priorita' 1 leggeva app.live_tracking del poller legacy, ora RITIRATO:
+    era sempre vuota, quindi ogni giro ricadeva sull'API events -> grosso spreco quota.)"""
+    # 1) cache condivisa del tick early-goal (persistente su Turso, aggiornata ogni 5 min)
     try:
-        import app as _app_mod
-        tracked = _app_mod.live_tracking.get(fixture_id)
-        if tracked is not None:
-            return tracked.get('first_goal_min')
+        import predictions_settlement as _pset
+        v = _pset._LIVE_FG.get(fixture_id)
+        if v is not None:
+            return v   # int: minuto reale, oppure 999 = "determinato, non entro il 16'"
     except Exception:
         pass
-    # 2) Cache locale
+    # 2) Cache locale: TTL lungo se il gol e' noto (il minuto non cambia), corto se None
     now = time.time()
     c = _EVENTS_CACHE.get(fixture_id)
-    if c and now - c[0] < _EVENTS_TTL:
-        return c[1]
-    # 3) Fallback: chiama API events (solo se non in tracking e non in cache)
+    if c is not None:
+        ttl = _EVENTS_TTL_FOUND if c[1] is not None else _EVENTS_TTL_NONE
+        if now - c[0] < ttl:
+            return c[1]
+    # 3) Fallback: chiama API events (solo se non noto altrove e cache scaduta)
     data = _apisports_get('/fixtures/events', {'fixture': fixture_id})
     fgm = None
     if isinstance(data, dict):
