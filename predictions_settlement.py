@@ -1017,9 +1017,9 @@ def _ht_settled(mk, sh, sa):
     return False
 
 
-def _ht_signal_build(fixture_id, ht_only=True, state=None):
-    """Segnale HT per una fixture. `state` opzionale = stato live gia' noto (per non
-    rifare la chiamata nel tick). Ritorna dict col segnale o {'skip': motivo}."""
+def _ht_signal_build(fixture_id, ht_only=True, state=None, fgm=None):
+    """Segnale HT per una fixture. `state` e `fgm` opzionali = gia' noti dal tick (per
+    non rifare le chiamate). Ritorna dict col segnale o {'skip': motivo}."""
     import ml_pick
     st = state or _ht_fetch_fixture(fixture_id)
     if not st:
@@ -1029,7 +1029,8 @@ def _ht_signal_build(fixture_id, ht_only=True, state=None):
         return {'skip': 'non a fine primo tempo (status=%s)' % st.get('status')}
     if (sh, sa) not in _HT_SCORELINES:
         return {'skip': 'punteggio %d-%d fuori filtro' % (sh, sa)}
-    fgm = ml_pick._get_first_goal_minute(fixture_id)
+    if fgm is None:
+        fgm = ml_pick._get_first_goal_minute(fixture_id)
     if fgm is None or fgm > 16:
         return {'skip': '1o gol non entro il 16 (fgm=%s)' % fgm}
     lid = st.get('league_id')
@@ -1083,30 +1084,98 @@ def _ht_signal_build(fixture_id, ht_only=True, state=None):
 
 
 def _ht_signal_text(sig):
-    """Testo notifica Telegram (quote auto api-football = riferimento, da confrontare col book)."""
+    """Testo notifica Telegram, formato B: flag in alto (verbosi), altri mercati sotto
+    (compatti) SENZA ripetere i flag. Testo HTML-safe (parse_mode HTML)."""
     st = sig['fixture']
     sh, sa = int(st.get('sh') or 0), int(st.get('sa') or 0)
 
-    def _row(r):
-        e = r['edge']
-        seg = ('+%.1f' % e) if e >= 0 else ('%.1f' % e)
-        return "- %s @ %s  (storico %s%%, n=%d, edge %s%%)" % (r['label'], r['quota'], r['base_rate'], r['n'], seg)
+    def _esc(s):
+        return str(s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-    t = "HT - %s vs %s\n%s | 1o gol %d' | stato %d-%d\n" % (
-        st.get('home') or '?', st.get('away') or '?', st.get('league_name') or '', sig['fgm'], sh, sa)
+    def _seg(e):
+        return ('+%.1f' % e) if e >= 0 else ('%.1f' % e)
+
+    def _flag_row(r):
+        return "• %s @ %s  (storico %s%%, edge %s%%)" % (_esc(r['label']), r['quota'], r['base_rate'], _seg(r['edge']))
+
+    def _other_row(r):
+        return "• %s @ %s → %s%%" % (_esc(r['label']), r['quota'], _seg(r['edge']))
+
+    t = "⚽ HT — %s vs %s\n%s · 1° gol %d' · stato %d-%d\n" % (
+        _esc(st.get('home')), _esc(st.get('away')), _esc(st.get('league_name')), sig['fgm'], sh, sa)
     if sig['flags']:
-        t += "\nFLAG (edge >= %d%% su quota api-football):\n" % int(_HT_FLAG_EDGE)
-        t += "\n".join(_row(r) for r in sig['flags']) + "\n"
+        t += "\n\U0001F6A9 FLAG (edge ≥ %d%%):\n" % int(_HT_FLAG_EDGE)
+        t += "\n".join(_flag_row(r) for r in sig['flags']) + "\n"
     else:
-        t += "\nNessun flag (nessun mercato a edge >= %d%%).\n" % int(_HT_FLAG_EDGE)
-    if sig['reference']:
-        t += "\nRiferimento api-football (confronta col TUO book):\n"
-        t += "\n".join(_row(r) for r in sig['reference']) + "\n"
+        t += "\nNessun flag (nessun mercato a edge ≥ %d%%).\n" % int(_HT_FLAG_EDGE)
+    others = [r for r in sig['reference'] if r['edge'] < _HT_FLAG_EDGE]
+    if others:
+        t += "\n\U0001F4CA Altri mercati (riferimento):\n"
+        t += "\n".join(_other_row(r) for r in others) + "\n"
     if sig['suspect']:
-        t += "\nScartate (quota auto sballata): " + ", ".join(
-            "%s @%s (edge %+.0f%%)" % (r['label'], r['quota'], r['edge']) for r in sig['suspect']) + "\n"
-    t += "\nNB: quote api-football (aggregato), non il tuo book. Usale solo come screening."
+        t += "\n⚠ Scartate (quota sballata): " + ", ".join("%s @%s" % (_esc(r['label']), r['quota']) for r in sig['suspect']) + "\n"
+    t += "\nNB: quote api-football (aggregato), NON il tuo book. Solo screening."
     return t
+
+
+DDL_HT_SEEN = ("CREATE TABLE IF NOT EXISTS ht_signal_seen ("
+               "fixture_id INTEGER PRIMARY KEY, "
+               "ts INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)))")
+
+
+def _ht_dispatch(resp):
+    """Per ogni partita live AL HT, early-goal (1o gol <=16'), col punteggio nel filtro
+    e NON ancora notificata: costruisce il segnale e lo manda su Telegram (dedup via
+    Turso). 1 sola chiamata quote per partita (stato e fgm riusati dal tick). Ritorna
+    quante notifiche ha inviato."""
+    monitored = _monitored_leagues()
+    try:
+        _turso_execute(DDL_HT_SEEN)
+    except Exception:
+        pass
+    sent = 0
+    for f in (resp or []):
+        try:
+            lg = f.get('league') or {}
+            lid = lg.get('id')
+            if lid not in monitored:
+                continue
+            fx = f.get('fixture') or {}
+            if ((fx.get('status') or {}).get('short')) != 'HT':
+                continue
+            g = f.get('goals') or {}
+            sh, sa = int(g.get('home') or 0), int(g.get('away') or 0)
+            if (sh, sa) not in _HT_SCORELINES:
+                continue
+            fid = (fx.get('id'))
+            if fid is None:
+                continue
+            fgm = _LIVE_FG.get(fid)
+            if fgm is None or fgm > 16:
+                continue
+            try:
+                if _turso_select_rows("SELECT 1 FROM ht_signal_seen WHERE fixture_id=?", [fid]):
+                    continue
+            except Exception:
+                pass
+            teams = f.get('teams') or {}
+            state = {'fixture_id': fid, 'minute': (fx.get('status') or {}).get('elapsed') or 45,
+                     'status': 'HT', 'sh': sh, 'sa': sa, 'league_id': lid,
+                     'league_name': _league_name(lid) or lg.get('name'),
+                     'home': (teams.get('home') or {}).get('name'), 'away': (teams.get('away') or {}).get('name')}
+            sig = _ht_signal_build(fid, ht_only=True, state=state, fgm=fgm)
+            # marca come vista comunque: le quote sono gia' state chieste, non rifare al prossimo tick
+            try:
+                _turso_execute("INSERT OR IGNORE INTO ht_signal_seen (fixture_id) VALUES (?)", [fid])
+            except Exception:
+                pass
+            if sig.get('skip') or not sig.get('flags'):
+                continue
+            if _send_telegram(sig['telegram']):
+                sent += 1
+        except Exception:
+            continue
+    return sent
 
 
 _LLM_SYSTEM = (
@@ -1613,7 +1682,15 @@ def _refresh_live_eg(send_telegram=False):
                     sent += 1
         except Exception:
             pass
-    return {'live_earlygoal': len(out), 'telegram_sent': sent}
+    # Segnale HT (fine primo tempo): early-goal + punteggio filtro -> notifica con
+    # quote di riferimento api-football ripulite. Solo dal cron (send_telegram=True).
+    ht_sent = 0
+    if send_telegram:
+        try:
+            ht_sent = _ht_dispatch(resp)
+        except Exception:
+            pass
+    return {'live_earlygoal': len(out), 'telegram_sent': sent, 'ht_signal_sent': ht_sent}
 
 def _ro_con(timeout=15.0):
     """Connessione al DB locale con busy_timeout: sotto contesa (es. archiver in
