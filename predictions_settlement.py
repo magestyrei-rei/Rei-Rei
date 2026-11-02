@@ -973,6 +973,142 @@ def _live_analysis_data_block(board, quotes, capitale):
     return "\n".join(L)
 
 
+# === Segnale HT (fine primo tempo): early-goal + punteggio filtro -> quote auto
+#     api-football RIPULITE -> edge vs storico -> flag + quote di riferimento. ===
+_HT_SCORELINES = {(1, 0), (0, 1), (1, 1), (2, 0), (0, 2), (2, 1), (1, 2)}
+_HT_FLAG_EDGE = 10.0      # soglia edge (%) per considerare un mercato "flag"
+_HT_EDGE_CAP = 40.0       # oltre questo edge la quota auto e' quasi certamente sballata -> scartata
+_HT_MARKETS = ['under_1_5', 'under_2_5', 'under_3_5', 'under_4_5',
+               'over_1_5', 'over_2_5', 'over_3_5', 'over_4_5', 'btts_no', 'btts_si', '1', 'X', '2']
+_HT_LABEL = {'under_1_5': 'Under 1.5', 'under_2_5': 'Under 2.5', 'under_3_5': 'Under 3.5', 'under_4_5': 'Under 4.5',
+             'over_1_5': 'Over 1.5', 'over_2_5': 'Over 2.5', 'over_3_5': 'Over 3.5', 'over_4_5': 'Over 4.5',
+             'btts_no': 'BTTS No', 'btts_si': 'BTTS Si', '1': '1 (Casa)', 'X': 'X', '2': '2 (Ospite)'}
+
+
+def _ht_fetch_fixture(fid):
+    """Stato live di una fixture da api-football (minuto, punteggio, lega, squadre)."""
+    data = _af_get('/fixtures', {'id': int(fid)})
+    resp = (data or {}).get('response') or []
+    if not resp:
+        return None
+    f = resp[0]
+    fx = f.get('fixture') or {}
+    stt = (fx.get('status') or {})
+    g = f.get('goals') or {}
+    teams = f.get('teams') or {}
+    lg = f.get('league') or {}
+    return {'fixture_id': fid, 'minute': stt.get('elapsed'), 'status': stt.get('short'),
+            'sh': g.get('home') or 0, 'sa': g.get('away') or 0,
+            'league_id': lg.get('id'), 'league_name': lg.get('name'),
+            'home': (teams.get('home') or {}).get('name'), 'away': (teams.get('away') or {}).get('name')}
+
+
+def _ht_settled(mk, sh, sa):
+    """True se il mercato e' gia' deciso dal punteggio corrente (quota inutile)."""
+    tot = sh + sa
+    OV = {'over_1_5': 1, 'over_2_5': 2, 'over_3_5': 3, 'over_4_5': 4}
+    UN = {'under_1_5': 1, 'under_2_5': 2, 'under_3_5': 3, 'under_4_5': 4}
+    if mk in OV and tot > OV[mk]:
+        return True
+    if mk in UN and tot > UN[mk]:
+        return True
+    if mk in ('btts_si', 'btts_no') and sh > 0 and sa > 0:
+        return True
+    return False
+
+
+def _ht_signal_build(fixture_id, ht_only=True, state=None):
+    """Segnale HT per una fixture. `state` opzionale = stato live gia' noto (per non
+    rifare la chiamata nel tick). Ritorna dict col segnale o {'skip': motivo}."""
+    import ml_pick
+    st = state or _ht_fetch_fixture(fixture_id)
+    if not st:
+        return {'skip': 'fixture non trovata'}
+    sh, sa = int(st.get('sh') or 0), int(st.get('sa') or 0)
+    if ht_only and st.get('status') != 'HT':
+        return {'skip': 'non a fine primo tempo (status=%s)' % st.get('status')}
+    if (sh, sa) not in _HT_SCORELINES:
+        return {'skip': 'punteggio %d-%d fuori filtro' % (sh, sa)}
+    fgm = ml_pick._get_first_goal_minute(fixture_id)
+    if fgm is None or fgm > 16:
+        return {'skip': '1o gol non entro il 16 (fgm=%s)' % fgm}
+    lid = st.get('league_id')
+    mn = st.get('minute') if (st.get('minute') and st['minute'] >= 1) else 45
+    base = {}
+    try:
+        for m in _invest_scan(lid, mn, sh, sa, _invest_bucket(fgm)):
+            if not m.get('ht'):
+                base[m['market']] = {'base_rate': m['base_rate'], 'n': m['n']}
+        for mk in ('1', 'X', '2'):
+            br, n = _bet_base_rate(lid, mk, mn, sh, sa)
+            if n:
+                base[mk] = {'base_rate': br, 'n': n}
+    except Exception as e:
+        return {'skip': 'storico non disponibile: %s' % (str(e)[:120])}
+    try:
+        parsed = ml_pick._parse_odds_payload(ml_pick._get_live_odds(fixture_id)) or {}
+    except Exception:
+        parsed = {}
+
+    def _auto(mk):
+        v = (parsed.get(mk) or {}).get('apifootball-live')
+        try:
+            v = float(v)
+            return v if v > 1 else None
+        except Exception:
+            return None
+
+    ref, flags, suspect = [], [], []
+    for mk in _HT_MARKETS:
+        if _ht_settled(mk, sh, sa):
+            continue
+        q = _auto(mk)
+        b = base.get(mk)
+        if q is None or not b:
+            continue
+        edge = round(b['base_rate'] - 100.0 / q, 1)
+        row = {'market': mk, 'label': _HT_LABEL.get(mk, mk), 'quota': round(q, 2),
+               'base_rate': b['base_rate'], 'n': b['n'], 'edge': edge}
+        if edge > _HT_EDGE_CAP:
+            suspect.append(row)
+            continue
+        ref.append(row)
+        if edge >= _HT_FLAG_EDGE:
+            flags.append(row)
+    flags.sort(key=lambda r: -r['edge'])
+    ref.sort(key=lambda r: -r['edge'])
+    out = {'fixture': st, 'fgm': fgm, 'minute': mn, 'flags': flags, 'reference': ref, 'suspect': suspect}
+    out['telegram'] = _ht_signal_text(out)
+    return out
+
+
+def _ht_signal_text(sig):
+    """Testo notifica Telegram (quote auto api-football = riferimento, da confrontare col book)."""
+    st = sig['fixture']
+    sh, sa = int(st.get('sh') or 0), int(st.get('sa') or 0)
+
+    def _row(r):
+        e = r['edge']
+        seg = ('+%.1f' % e) if e >= 0 else ('%.1f' % e)
+        return "- %s @ %s  (storico %s%%, n=%d, edge %s%%)" % (r['label'], r['quota'], r['base_rate'], r['n'], seg)
+
+    t = "HT - %s vs %s\n%s | 1o gol %d' | stato %d-%d\n" % (
+        st.get('home') or '?', st.get('away') or '?', st.get('league_name') or '', sig['fgm'], sh, sa)
+    if sig['flags']:
+        t += "\nFLAG (edge >= %d%% su quota api-football):\n" % int(_HT_FLAG_EDGE)
+        t += "\n".join(_row(r) for r in sig['flags']) + "\n"
+    else:
+        t += "\nNessun flag (nessun mercato a edge >= %d%%).\n" % int(_HT_FLAG_EDGE)
+    if sig['reference']:
+        t += "\nRiferimento api-football (confronta col TUO book):\n"
+        t += "\n".join(_row(r) for r in sig['reference']) + "\n"
+    if sig['suspect']:
+        t += "\nScartate (quota auto sballata): " + ", ".join(
+            "%s @%s (edge %+.0f%%)" % (r['label'], r['quota'], r['edge']) for r in sig['suspect']) + "\n"
+    t += "\nNB: quote api-football (aggregato), non il tuo book. Usale solo come screening."
+    return t
+
+
 _LLM_SYSTEM = (
     "Sei un analista di scommesse calcistiche esperto, prudente e onesto. "
     "Analizza USANDO SOLO i numeri forniti nei dati: NON inventare statistiche, quote o "
@@ -2599,6 +2735,19 @@ def register(app):
             if err:
                 return jsonify({'error': err})
             return jsonify({'analysis': result})
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 500
+
+    @app.route('/api/ht-signal')
+    def api_ht_signal():
+        """TEST segnale HT per una fixture (NON invia Telegram). ?fixture=ID e, per
+        testare anche partite non esattamente al HT, &ht=0 (ignora il filtro 'solo HT')."""
+        try:
+            fid = int(request.args.get('fixture') or 0)
+            if not fid:
+                return jsonify({'error': 'parametro fixture richiesto'}), 400
+            ht_only = request.args.get('ht', '1') != '0'
+            return jsonify(_ht_signal_build(fid, ht_only=ht_only))
         except Exception as e:
             return jsonify({'error': str(e)[:300]}), 500
 
