@@ -333,6 +333,7 @@
     <div id="storico-sintesi" style="margin-bottom:14px"></div>
     <div id="storico-confronto" style="margin-bottom:14px"></div>
     <div id="storico-fade" style="margin-bottom:14px"></div>
+    <div id="storico-edge" style="margin-bottom:14px"></div>
     <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
   </section>
 
@@ -2095,7 +2096,7 @@ function renderStoricoCards(list){
   if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata per questo book.</div>'; return; }
   el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
 }
-function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoFade(fl); renderStoricoCards(fl); }
+function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoFade(fl); renderStoricoEdge(fl); renderStoricoCards(fl); }
 // --- Fade per mercato x numero di flag ---
 // Per ogni mercato flaggato: quanto rende FADEARLO (puntare il contrario),
 // spezzato per quanti flag aveva il match. Riusa _oppInfo/_storWin come la Sintesi.
@@ -2154,6 +2155,172 @@ function renderStoricoFade(list){
     +'</div>'
   +'</div>';
 }
+// --- Analisi Edge: edge- vs edge+ per mercato, per severita, per n flag ---
+var _edgeOpen=false;
+var _EDGE_FAMS=['Under','Over','BTTS No','BTTS Si','1','2','X'];
+var _EDGE_FAMLAB={'Under':'Under','Over':'Over','BTTS No':'BTTS No','BTTS Si':'BTTS S&igrave;','1':'1 (Casa)','2':'2 (Ospite)','X':'X'};
+function _edgeFam(mk){
+  if(mk.indexOf('under_')===0)return 'Under';
+  if(mk.indexOf('over_')===0)return 'Over';
+  if(mk==='btts_no')return 'BTTS No';
+  if(mk==='btts_si')return 'BTTS Si';
+  if(mk==='1')return '1';
+  if(mk==='2')return '2';
+  if(mk==='X')return 'X';
+  return null;
+}
+function _edgeOf(rr){
+  var q=parseFloat(rr.bookie); if(!q||q<=1) return null;
+  var br=(rr.base_rate!=null)?parseFloat(rr.base_rate):NaN; if(isNaN(br)) return null;
+  return { q:q, edge:br-100/q };
+}
+function _edgeAcc(c,win,q){ c.n++; if(win){ c.w++; c.ret+=q; } }
+function _edgePct(c){ return (c&&c.n)?Math.round(c.w/c.n*100):null; }
+function _edgeRoi(c){ return (c&&c.n)?Math.round((c.ret-c.n)/c.n*100):null; }
+function _negFlags(s){
+  var rows=((s.board_json||{}).rows)||[], out=[];
+  rows.forEach(function(rr){
+    if(!_edgeFam(rr.market)) return;
+    var e=_edgeOf(rr); if(!e) return;
+    if(e.edge<=-10){ out.push({ mk:rr.market, quota:e.q, edge:e.edge }); }
+  });
+  out.sort(function(a,b){ return a.edge-b.edge; });
+  return out;
+}
+function _edgeAgg(list){
+  var PM={}; _EDGE_FAMS.forEach(function(f){ PM[f]={ neg:{w:0,n:0,ret:0}, pos:{w:0,n:0,ret:0} }; });
+  var SN=[{w:0,n:0,ret:0},{w:0,n:0,ret:0},{w:0,n:0,ret:0},{w:0,n:0,ret:0}];
+  var SP=[{w:0,n:0,ret:0},{w:0,n:0,ret:0},{w:0,n:0,ret:0},{w:0,n:0,ret:0}];
+  (list||[]).forEach(function(s){
+    var sc=_storScore(s.result); if(!sc) return;
+    var rows=((s.board_json||{}).rows)||[];
+    rows.forEach(function(rr){
+      var fam=_edgeFam(rr.market); if(!fam) return;
+      var e=_edgeOf(rr); if(!e) return;
+      var win=_storWin(rr.market,sc.h,sc.a); if(win===null) return;
+      if(e.edge<0){
+        _edgeAcc(PM[fam].neg,win,e.q);
+        var i=(e.edge>=-5)?0:(e.edge>=-15?1:(e.edge>=-25?2:3));
+        _edgeAcc(SN[i],win,e.q);
+      } else if(e.edge>0){
+        _edgeAcc(PM[fam].pos,win,e.q);
+        var j=(e.edge<=5)?0:(e.edge<=10?1:(e.edge<=20?2:3));
+        _edgeAcc(SP[j],win,e.q);
+      }
+    });
+  });
+  return { PM:PM, SN:SN, SP:SP };
+}
+function _edgeByFlag(list){
+  var R={}; ['1','2','3','4+'].forEach(function(b){ R[b]={ pos:{w:0,n:0,ret:0}, neg:{w:0,n:0,ret:0} }; });
+  var any=false;
+  (list||[]).forEach(function(s){
+    var sc=_storScore(s.result); if(!sc) return;
+    var flags=s.flagged||[];
+    var k=0; flags.forEach(function(f){ if(_storWin(f.market,sc.h,sc.a)!==null) k++; });
+    if(k<1) return;
+    var bk=(k>=4)?'4+':(''+k); any=true;
+    flags.forEach(function(f){
+      var win=_storWin(f.market,sc.h,sc.a); if(win===null) return;
+      var q=parseFloat(f.quota); if(!q||q<=1) return;
+      _edgeAcc(R[bk].pos,win,q);
+    });
+    var rows=((s.board_json||{}).rows)||[];
+    rows.forEach(function(rr){
+      if(!_edgeFam(rr.market)) return;
+      var e=_edgeOf(rr); if(!e||e.edge>=0) return;
+      var win=_storWin(rr.market,sc.h,sc.a); if(win===null) return;
+      _edgeAcc(R[bk].neg,win,e.q);
+    });
+  });
+  R._any=any; return R;
+}
+function toggleEdge(){ var b=document.getElementById('edge-body'),c=document.getElementById('edge-chev'); if(!b)return; _edgeOpen=(b.style.display==='none'); b.style.display=_edgeOpen?'block':'none'; if(c)c.innerHTML=_edgeOpen?'&#x25BC;':'&#x25B6;'; }
+function _edgeTd3(c,bl){
+  var sep=bl?';border-left:0.5px solid #1e293b':'';
+  if(!c||!c.n){ return '<td style="text-align:center;padding:4px 5px;color:#475569'+sep+'">&mdash;</td><td style="text-align:center;padding:4px 5px;color:#475569">&mdash;</td><td style="text-align:center;padding:4px 5px;color:#475569">&mdash;</td>'; }
+  var roi=_edgeRoi(c),pos=roi>=0,warn=c.n<5?' <span style="color:#f59e0b;font-size:8px">&#x26A0;</span>':'';
+  return '<td style="text-align:center;padding:4px 5px'+sep+'">'+_edgePct(c)+'%</td>'
+    +'<td style="text-align:center;padding:4px 5px;font-weight:600;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%</td>'
+    +'<td style="text-align:center;padding:4px 5px;color:#64748b;font-size:10px">'+c.n+warn+'</td>';
+}
+function _edgeLad(title,bg,col,labs,cells){
+  var rows=labs.map(function(lab,i){
+    var c=cells[i];
+    if(!c||!c.n){ return '<tr><td style="text-align:left;padding:3px 8px;color:#e2e8f0;font-size:11px;white-space:nowrap">'+lab+'</td><td style="text-align:center;padding:3px 5px;color:#475569">&mdash;</td><td style="text-align:center;padding:3px 5px;color:#475569">&mdash;</td><td style="text-align:center;padding:3px 5px;color:#475569">&mdash;</td></tr>'; }
+    var roi=_edgeRoi(c),pos=roi>=0,warn=c.n<5?' <span style="color:#f59e0b;font-size:8px">&#x26A0;</span>':'';
+    return '<tr><td style="text-align:left;padding:3px 8px;color:#e2e8f0;font-size:11px;white-space:nowrap">'+lab+'</td>'
+      +'<td style="text-align:center;padding:3px 5px;font-size:11.5px">'+_edgePct(c)+'%</td>'
+      +'<td style="text-align:center;padding:3px 5px;font-size:11.5px;font-weight:600;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%</td>'
+      +'<td style="text-align:center;padding:3px 5px;color:#64748b;font-size:10px">'+c.n+warn+'</td></tr>';
+  }).join('');
+  return '<div style="flex:1;min-width:220px;border:0.5px solid #1e293b;border-radius:8px;overflow:hidden;margin-bottom:8px">'
+    +'<div style="font-size:10.5px;font-weight:600;padding:5px 8px;text-align:center;background:'+bg+';color:'+col+'">'+title+'</div>'
+    +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table></div>';
+}
+function renderStoricoEdge(list){
+  var host=document.getElementById('storico-edge'); if(!host) return;
+  var A=_edgeAgg(list);
+  var fams=_EDGE_FAMS.filter(function(f){ return (A.PM[f].neg.n+A.PM[f].pos.n)>0; });
+  if(!fams.length){ host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;background:#0f172a;padding:10px 14px;font-size:12px;color:#64748b">&#x1F4CA; <b>Analisi Edge</b>: comparir&agrave; quando avrai partite con <b>risultato</b> inserito.</div>'; return; }
+  var sct='font-size:11px;font-weight:600;letter-spacing:.04em;color:#60a5fa;margin:14px 0 3px';
+  var sub='font-size:10.5px;color:#64748b;margin-bottom:5px';
+  // Parte 1: per mercato
+  var pmHead='<tr><th rowspan="2" style="text-align:left;padding:4px 8px;color:#64748b;font-size:9px">MERCATO</th>'
+    +'<th colspan="3" style="padding:4px 5px;color:#67e8f9;font-size:9px">EDGE &minus; (sopravvalutati)</th>'
+    +'<th colspan="3" style="padding:4px 5px;color:#fca5a5;font-size:9px;border-left:0.5px solid #1e293b">EDGE + (valore)</th></tr>'
+    +'<tr style="color:#64748b;font-size:9px"><th style="padding:2px 5px">%esc</th><th style="padding:2px 5px">ROI</th><th style="padding:2px 5px">n</th>'
+    +'<th style="padding:2px 5px;border-left:0.5px solid #1e293b">%esc</th><th style="padding:2px 5px">ROI</th><th style="padding:2px 5px">n</th></tr>';
+  var pmRows=fams.map(function(f){
+    return '<tr style="border-top:0.5px solid #1e293b"><td style="text-align:left;padding:4px 8px;color:#e2e8f0;font-size:11px;white-space:nowrap">'+_EDGE_FAMLAB[f]+'</td>'
+      +_edgeTd3(A.PM[f].neg)+_edgeTd3(A.PM[f].pos,true)+'</tr>';
+  }).join('');
+  var part1='<div style="'+sct+'">1 &middot; PER MERCATO</div>'
+    +'<div style="'+sub+'">Per ogni mercato i due lati affiancati: % che escono e ROI se li punti.</div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:430px"><thead>'+pmHead+'</thead><tbody>'+pmRows+'</tbody></table></div>';
+  // Parte 2: per forza dell edge
+  var part2='<div style="'+sct+';margin-top:16px">2 &middot; PER FORZA DELL&#39;EDGE</div>'
+    +'<div style="'+sub+'">Pi&ugrave; l&#39;edge &egrave; estremo, pi&ugrave; o meno esce? (a sinistra il negativo, a destra il positivo)</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    +_edgeLad('EDGE &minus; (pi&ugrave; negativo &rarr;)','#07263a','#67e8f9',['0&hellip;&minus;5%','&minus;5&hellip;&minus;15%','&minus;15&hellip;&minus;25%','&lt;&minus;25%'],A.SN)
+    +_edgeLad('EDGE + (pi&ugrave; alto &rarr;)','#3b1d1d','#fca5a5',['+0&hellip;5%','+5&hellip;10%','+10&hellip;20%','+20%+'],A.SP)
+    +'</div>';
+  // Parte 3: per numero di flag
+  var F=_edgeByFlag(list);
+  var part3='';
+  if(F._any){
+    function cell2(c,bl){
+      var sep=bl?';border-left:0.5px solid #1e293b':'';
+      if(!c||!c.n) return '<td style="text-align:center;padding:4px 5px;color:#475569'+sep+'">&mdash;</td><td style="text-align:center;padding:4px 5px;color:#475569">&mdash;</td>';
+      var roi=_edgeRoi(c),pos=roi>=0,warn=c.n<5?' <span style="color:#f59e0b;font-size:8px">&#x26A0;</span>':'';
+      return '<td style="text-align:center;padding:4px 5px'+sep+'">'+_edgePct(c)+'%</td><td style="text-align:center;padding:4px 5px;font-weight:600;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%'+warn+'</td>';
+    }
+    var fLab={'1':'1 flag','2':'2 flag','3':'3 flag','4+':'4+ flag'};
+    var fKeys=['1','2','3','4+'].filter(function(b){ return (F[b].pos.n+F[b].neg.n)>0; });
+    var fRows=fKeys.map(function(b){
+      return '<tr style="border-top:0.5px solid #1e293b"><td style="text-align:left;padding:4px 8px;color:#e2e8f0;font-size:11px">'+fLab[b]+'</td>'
+        +cell2(F[b].pos)+cell2(F[b].neg,true)+'</tr>';
+    }).join('');
+    var fHead='<tr><th rowspan="2" style="text-align:left;padding:4px 8px;color:#64748b;font-size:9px">FLAG sul match</th>'
+      +'<th colspan="2" style="padding:4px 5px;color:#fca5a5;font-size:9px">Flag positivi</th>'
+      +'<th colspan="2" style="padding:4px 5px;color:#67e8f9;font-size:9px;border-left:0.5px solid #1e293b">Mercati edge &minus;</th></tr>'
+      +'<tr style="color:#64748b;font-size:9px"><th style="padding:2px 5px">%esc</th><th style="padding:2px 5px">ROI</th><th style="padding:2px 5px;border-left:0.5px solid #1e293b">%esc</th><th style="padding:2px 5px">ROI</th></tr>';
+    part3='<div style="'+sct+';margin-top:16px">3 &middot; PER NUMERO DI FLAG</div>'
+      +'<div style="'+sub+'">Rendimento dei flag (positivi) vs dei mercati a edge negativo, secondo quanti flag aveva il match.</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:380px"><thead>'+fHead+'</thead><tbody>'+fRows+'</tbody></table></div>';
+  }
+  var note='<div style="font-size:11px;color:#64748b;margin-top:12px;line-height:1.6">Per ogni mercato dello storico (non solo i flag) calcolo l&#39;<b>edge</b> = base rate storica &minus; quota implicita, poi guardo quanto spesso quel mercato <b>&egrave; uscito</b> e il <b>ROI</b> a puntarlo. <span style="color:#67e8f9">Edge &minus;</span> = la storia lo d&agrave; pi&ugrave; probabile di quanto dica il prezzo. <span style="color:#f59e0b">&#x26A0;</span> = meno di 5 casi (indicativo). Rispetta il filtro Book qui sopra.</div>';
+  var bodyDisp=_edgeOpen?'block':'none', chev=_edgeOpen?'&#x25BC;':'&#x25B6;';
+  host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
+    +'<div onclick="toggleEdge()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
+      +'<span style="font-size:16px">&#x1F4CA;</span>'
+      +'<span style="font-size:14px;font-weight:600;color:#e2e8f0">Analisi Edge</span>'
+      +'<span style="font-size:11px;color:#64748b">edge &minus; vs edge +</span>'
+      +'<span id="edge-chev" style="margin-left:auto;color:#94a3b8">'+chev+'</span>'
+    +'</div>'
+    +'<div id="edge-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'+part1+part2+part3+note+'</div>'
+  +'</div>';
+}
 async function loadStorico(){
   var el=document.getElementById('storico-list');
   el.innerHTML='<div style="color:#64748b;font-size:13px">Carico...</div>';
@@ -2166,6 +2333,7 @@ async function loadStorico(){
     renderStoricoSintesi(fl);
     renderStoricoConfronto(fl);
     renderStoricoFade(fl);
+    renderStoricoEdge(fl);
     if(!_storAllList.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
     renderStoricoCards(fl);
   }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
@@ -2201,10 +2369,19 @@ function renderSavedCard(s){
   });
   var boardHtml=boardRows?('<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px"><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:3px 8px">Mercato</th><th style="padding:3px 8px">%</th><th style="padding:3px 8px">Quota</th><th style="padding:3px 8px">n</th><th style="padding:3px 8px">Edge</th></tr></thead><tbody>'+boardRows+'</tbody></table>'):'';
   var analysisHtml=s.analysis_text?('<details><summary>Lettura AI</summary><div style="margin-top:6px;font-size:12.5px;color:#cbd5e1;line-height:1.55">'+_escHtml(s.analysis_text).replace(/\n/g,'<br>')+'</div></details>'):'';
+  var negHtml='';
+  var _negf=_negFlags(s);
+  if(_negf.length){
+    var _negItems=_negf.map(function(n){
+      return '<span style="display:inline-block;background:#07263a;border:1px solid #0e4a6e;color:#67e8f9;border-radius:6px;padding:2px 8px;font-size:12px;margin:2px 4px 2px 0">'+_mktLabel(n.mk)+' @'+(Math.round(n.quota*100)/100)+' <b>'+n.edge.toFixed(1)+'%</b></span>';
+    }).join('');
+    negHtml='<div style="margin-top:6px"><span style="font-size:11px;color:#94a3b8">&#x1F4C9; Edge negativo (&le;&minus;10%) &mdash; mercati sopravvalutati:</span><br><div style="margin-top:3px">'+_negItems+'</div></div>';
+  }
   var res=(s.result||'');
   return '<div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px 14px;margin-bottom:12px">'
     +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><div style="font-size:13px;color:#cbd5e1">'+head+'</div><div style="display:flex;align-items:center;gap:8px">'+bkBadge+'<span style="font-size:11px;color:#64748b">'+date+'</span></div></div>'
     +(flaggedHtml?('<div style="margin-top:6px"><span style="font-size:11px;color:#94a3b8">Edge alto flaggato:</span><br>'+flaggedHtml+'</div>'):'')
+    +negHtml
     +boardHtml
     +analysisHtml
     +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
