@@ -976,7 +976,8 @@ def _live_analysis_data_block(board, quotes, capitale):
 # === Segnale HT (fine primo tempo): early-goal + punteggio filtro -> quote auto
 #     api-football RIPULITE -> edge vs storico -> flag + quote di riferimento. ===
 _HT_SCORELINES = {(1, 0), (0, 1), (1, 1), (2, 0), (0, 2), (2, 1), (1, 2)}
-_HT_FLAG_EDGE = 10.0      # soglia edge (%) per considerare un mercato "flag"
+_HT_FLAG_EDGE = 10.0      # soglia edge (%) per considerare un mercato "flag" (edge positivo alto)
+_HT_NEG_EDGE = -10.0      # soglia edge negativo: storico li da' + probabili del prezzo -> escono di piu' (finding dataset)
 _HT_EDGE_CAP = 40.0       # oltre questo edge la quota auto e' quasi certamente sballata -> scartata
 _HT_MARKETS = ['under_1_5', 'under_2_5', 'under_3_5', 'under_4_5',
                'over_1_5', 'over_2_5', 'over_3_5', 'over_4_5', 'btts_no', 'btts_si', '1', 'X', '2']
@@ -1078,7 +1079,9 @@ def _ht_signal_build(fixture_id, ht_only=True, state=None, fgm=None):
             flags.append(row)
     flags.sort(key=lambda r: -r['edge'])
     ref.sort(key=lambda r: -r['edge'])
-    out = {'fixture': st, 'fgm': fgm, 'minute': mn, 'flags': flags, 'reference': ref, 'suspect': suspect}
+    neg = [r for r in ref if r['edge'] <= _HT_NEG_EDGE]
+    neg.sort(key=lambda r: r['edge'])  # piu' negativo prima (sul dataset = esce di piu')
+    out = {'fixture': st, 'fgm': fgm, 'minute': mn, 'flags': flags, 'neg': neg, 'reference': ref, 'suspect': suspect}
     out['telegram'] = _ht_signal_text(out)
     return out
 
@@ -1104,11 +1107,15 @@ def _ht_signal_text(sig):
     t = "⚽ HT — %s vs %s\n%s · 1° gol %d' · stato %d-%d\n" % (
         _esc(st.get('home')), _esc(st.get('away')), _esc(st.get('league_name')), sig['fgm'], sh, sa)
     if sig['flags']:
-        t += "\n\U0001F6A9 FLAG (edge ≥ %d%%):\n" % int(_HT_FLAG_EDGE)
+        t += "\n\U0001F6A9 FLAG edge+ (≥ %d%%):\n" % int(_HT_FLAG_EDGE)
         t += "\n".join(_flag_row(r) for r in sig['flags']) + "\n"
     else:
-        t += "\nNessun flag (nessun mercato a edge ≥ %d%%).\n" % int(_HT_FLAG_EDGE)
-    others = [r for r in sig['reference'] if r['edge'] < _HT_FLAG_EDGE]
+        t += "\nNessun flag edge+ (nessun mercato a edge ≥ %d%%).\n" % int(_HT_FLAG_EDGE)
+    neg = sig.get('neg') or []
+    if neg:
+        t += "\n\U0001F4C9 EDGE NEGATIVO (≤ %d%%) — storico li dà + probabili, escono di più:\n" % int(_HT_NEG_EDGE)
+        t += "\n".join(_flag_row(r) for r in neg) + "\n"
+    others = [r for r in sig['reference'] if _HT_NEG_EDGE < r['edge'] < _HT_FLAG_EDGE]
     if others:
         t += "\n\U0001F4CA Altri mercati (riferimento):\n"
         t += "\n".join(_other_row(r) for r in others) + "\n"
