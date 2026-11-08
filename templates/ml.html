@@ -2325,13 +2325,13 @@ function renderStoricoEdge(list){
 // --- Gol nel 2o tempo (gol successivi al salvataggio) per numero di flag ---
 var _golstOpen=false;
 function _golstAgg(list){
-  var G={}; ['tutte','1','2','3','4+','gt1'].forEach(function(k){ G[k]={n:0,g0:0,g1:0,g2:0,g3:0}; });
+  var G={}; ['tutte','1','2','3','4+','gt1'].forEach(function(k){ G[k]={n:0,g0:0,g1:0,g2:0,g3:0,hA:0,aA:0,hG:0,aG:0}; });
   var skipped=0, atHt=0, nValid=0;
   (list||[]).forEach(function(s){
     var st=_storScore(s.state), fin=_storScore(s.result);
     if(!st||!fin){ skipped++; return; }
-    var sub=(fin.h+fin.a)-(st.h+st.a);
-    if(sub<0){ skipped++; return; }
+    var dh=fin.h-st.h, da=fin.a-st.a, sub=dh+da;
+    if(dh<0||da<0){ skipped++; return; }
     nValid++;
     var m=parseInt(s.minute,10); if(!isNaN(m) && m>=43 && m<=47){ atHt++; }
     var k=(s.flagged||[]).length;
@@ -2340,7 +2340,7 @@ function _golstAgg(list){
     else if(k===2){ keys.push('2'); keys.push('gt1'); }
     else if(k===3){ keys.push('3'); keys.push('gt1'); }
     else if(k>=4){ keys.push('4+'); keys.push('gt1'); }
-    keys.forEach(function(key){ var c=G[key]; c.n++; if(sub===0)c.g0++; if(sub>=1)c.g1++; if(sub>=2)c.g2++; if(sub>=3)c.g3++; });
+    keys.forEach(function(key){ var c=G[key]; c.n++; if(sub===0)c.g0++; if(sub>=1)c.g1++; if(sub>=2)c.g2++; if(sub>=3)c.g3++; if(dh>=1)c.hA++; if(da>=1)c.aA++; c.hG+=dh; c.aG+=da; });
   });
   G._skipped=skipped; G._atHt=atHt; G._nValid=nValid;
   return G;
@@ -2363,6 +2363,19 @@ function _golstRow(label,c,emph){
     +_golstCell(c.g3,c.n,'#86efac')
     +'</tr>';
 }
+function _golstHaRow(label,c,emph){
+  if(!c.n){ return ''; }
+  var warn=c.n<5?' <span style="color:#f59e0b;font-size:8px">&#x26A0;</span>':'';
+  var hp=Math.round(c.hA/c.n*100), ap=Math.round(c.aA/c.n*100), tot=c.hG+c.aG, share=tot?Math.round(c.hG/tot*100):0;
+  function cl(pct,cnt,color,bl){ var sep=bl?';border-left:0.5px solid #1e293b':''; return '<td style="text-align:center;padding:4px 6px'+sep+'"><div style="font-size:12.5px;font-weight:600;color:'+color+'">'+pct+'%</div><div style="font-size:9.5px;color:#64748b">'+cnt+'/'+c.n+'</div></td>'; }
+  return '<tr style="border-top:0.5px solid #1e293b;'+(emph?'background:#0b1324;':'')+'">'
+    +'<td style="text-align:left;padding:4px 8px;font-size:11.5px;color:'+(emph?'#e2e8f0':'#cbd5e1')+';'+(emph?'font-weight:600':'')+';white-space:nowrap">'+label+warn+'</td>'
+    +'<td style="text-align:center;padding:4px 6px;color:#94a3b8;font-size:11px">'+c.n+'</td>'
+    +cl(hp,c.hA,'#86efac')
+    +cl(ap,c.aA,'#7dd3fc')
+    +'<td style="text-align:center;padding:4px 6px;border-left:0.5px solid #1e293b"><div style="font-size:12px;color:#e2e8f0">'+c.hG+'&ndash;'+c.aG+'</div><div style="font-size:9.5px;color:#64748b">Casa '+share+'%</div></td>'
+    +'</tr>';
+}
 function renderStoricoGolST(list){
   var host=document.getElementById('storico-golst'); if(!host) return;
   var G=_golstAgg(list);
@@ -2375,6 +2388,13 @@ function renderStoricoGolST(list){
     +(G['4+'].n?_golstRow('4+ flag',G['4+']):'')
     +(G.gt1.n?_golstRow('&gt;1 flag (&ge;2)',G.gt1,true):'');
   var htPct=G._nValid?Math.round(G._atHt/G._nValid*100):0;
+  var haHead='<tr style="color:#64748b;font-size:9.5px"><th style="text-align:left;padding:4px 8px">FLAG nel match</th><th style="padding:4px 6px">n</th><th style="padding:4px 6px">&#x1F3E0; Casa segna dopo</th><th style="padding:4px 6px">&#x2708; Osp segna dopo</th><th style="padding:4px 6px;border-left:0.5px solid #1e293b">Gol dopo (C&ndash;O)</th></tr>';
+  var haRows=_golstHaRow('Tutte',G.tutte,true)
+    +(G['1'].n?_golstHaRow('1 flag',G['1']):'')
+    +(G['2'].n?_golstHaRow('2 flag',G['2']):'')
+    +(G['3'].n?_golstHaRow('3 flag',G['3']):'')
+    +(G['4+'].n?_golstHaRow('4+ flag',G['4+']):'')
+    +(G.gt1.n?_golstHaRow('&gt;1 flag (&ge;2)',G.gt1,true):'');
   var bodyDisp=_golstOpen?'block':'none', chev=_golstOpen?'&#x25BC;':'&#x25B6;';
   host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
     +'<div onclick="toggleGolst()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
@@ -2386,6 +2406,9 @@ function renderStoricoGolST(list){
     +'<div id="golst-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:400px"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'
       +'<div style="font-size:11px;color:#64748b;margin-top:10px;line-height:1.6"><b>Gol successivi</b> = risultato finale &minus; stato al salvataggio ('+htPct+'% salvate al 45&#39; &rarr; &asymp; gol del <b>2&deg; tempo</b>). Le % = quante partite hanno fatto almeno quei gol dopo. <b>Pi&ugrave; flag &rarr; pi&ugrave; gol dopo</b>: a 3+ flag la partita ha quasi sempre ancora segnato (segnale <b>pro-gol</b>, non pro-Under). <span style="color:#f59e0b">&#x26A0;</span> = meno di 5 casi. Rispetta il filtro Book.</div>'
+      +'<div style="font-size:11px;color:#60a5fa;font-weight:600;letter-spacing:.04em;margin:16px 0 4px">CHI SEGNA NEL 2&deg; TEMPO (casa / ospite)</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:400px"><thead>'+haHead+'</thead><tbody>'+haRows+'</tbody></table></div>'
+      +'<div style="font-size:11px;color:#64748b;margin-top:10px;line-height:1.6">Chi ha segnato i gol <b>dopo</b> il salvataggio (% = in quante partite quella squadra ha segnato almeno un gol nel 2&deg; tempo; "Gol dopo" = totale gol casa&ndash;ospite). La <b>casa segna pi&ugrave; spesso</b> e il vantaggio <b>cresce coi flag</b>. &Egrave; il motivo per cui l&#39;edge negativo rende su <b>1 (Casa)</b> ma non su <b>2 (Ospite)</b>: nel 2&deg; tempo di queste partite segna soprattutto la casa.</div>'
     +'</div>'
   +'</div>';
 }
