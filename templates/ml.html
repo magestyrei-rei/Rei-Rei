@@ -335,6 +335,7 @@
     <div id="storico-fade" style="margin-bottom:14px"></div>
     <div id="storico-edge" style="margin-bottom:14px"></div>
     <div id="storico-golst" style="margin-bottom:14px"></div>
+    <div id="storico-rend" style="margin-bottom:14px"></div>
     <div id="storico-list"><div style="color:#64748b;font-size:13px">Carico...</div></div>
   </section>
 
@@ -2097,7 +2098,7 @@ function renderStoricoCards(list){
   if(!list.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata per questo book.</div>'; return; }
   el.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">'+list.length+' salvate</div>'+list.map(renderSavedCard).join('');
 }
-function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoFade(fl); renderStoricoEdge(fl); renderStoricoGolST(fl); renderStoricoCards(fl); }
+function setStorBook(b){ _storBook=(b==='Betfair'||b==='Betflag')?b:'all'; renderStoricoBookBar(); var fl=_storByBook(_storAllList); renderStoricoSintesi(fl); renderStoricoConfronto(fl); renderStoricoFade(fl); renderStoricoEdge(fl); renderStoricoGolST(fl); renderStoricoRend(fl); renderStoricoCards(fl); }
 // --- Fade per mercato x numero di flag ---
 // Per ogni mercato flaggato: quanto rende FADEARLO (puntare il contrario),
 // spezzato per quanti flag aveva il match. Riusa _oppInfo/_storWin come la Sintesi.
@@ -2412,6 +2413,76 @@ function renderStoricoGolST(list){
     +'</div>'
   +'</div>';
 }
+// --- Rendimento per mercato: seguire (+) vs andare contro / fade (-) ---
+var _rendOpen=false, _rendMode='fade', _rendList=[];
+var _REND_LAB={'1':'1 (Casa)','2':'2 (Ospite)','X':'X','btts_no':'BTTS No','btts_si':'BTTS S&igrave;',
+  under_1_5:'Under 1.5',under_2_5:'Under 2.5',under_3_5:'Under 3.5',under_4_5:'Under 4.5',under_5_5:'Under 5.5',
+  over_1_5:'Over 1.5',over_2_5:'Over 2.5',over_3_5:'Over 3.5',over_4_5:'Over 4.5',over_5_5:'Over 5.5',
+  dc_x2:'Dopp.ch. X2',dc_1x:'Dopp.ch. 1X',dc_12:'Dopp.ch. 12'};
+function _rendAgg(list){
+  var F={}, C={};
+  function add(M,mk,win,q,opp){ if(!M[mk])M[mk]={n:0,w:0,ret:0,opp:opp}; var c=M[mk]; c.n++; if(win){c.w++;c.ret+=q;} }
+  (list||[]).forEach(function(s){
+    var sc=_storScore(s.result); if(!sc) return;
+    (s.flagged||[]).forEach(function(f){
+      var mk=f.market, w=_storWin(mk,sc.h,sc.a); if(w===null) return;
+      var q=parseFloat(f.quota); if(!q||q<=1) return;
+      add(F,mk,w,q,mk);
+      var br=(f.base_rate!=null)?parseFloat(f.base_rate):null;
+      var opp=_oppInfo(mk,q,br,s);
+      if(opp&&opp.quota>1){ var cw=(opp.market.indexOf('dc_')===0)?_storWinOpp(mk,sc.h,sc.a):_storWin(opp.market,sc.h,sc.a); if(cw!==null) add(C,mk,cw,opp.quota,opp.market); }
+    });
+  });
+  return { follow:F, fade:C };
+}
+function toggleRend(){ var b=document.getElementById('rend-body'),c=document.getElementById('rend-chev'); if(!b)return; _rendOpen=(b.style.display==='none'); b.style.display=_rendOpen?'block':'none'; if(c)c.innerHTML=_rendOpen?'&#x25BC;':'&#x25B6;'; }
+function setRendMode(m){ _rendMode=(m==='follow')?'follow':'fade'; renderStoricoRend(_rendList); }
+function _rendPill(mode,label,active){ return '<button onclick="setRendMode(&#39;'+mode+'&#39;)" style="padding:5px 13px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:'+(active?'#1d4ed8':'transparent')+';color:'+(active?'#fff':'#94a3b8')+'">'+label+'</button>'; }
+function _rendRow(mk,c){
+  var roi=Math.round((c.ret-c.n)/c.n*1000)/10, wr=Math.round(c.w/c.n*100), eur=Math.round((100+(c.ret-c.n)*10)*10)/10;
+  var pos=roi>=0, warn=c.n<5?' <span style="color:#f59e0b;font-size:8px">&#x26A0;</span>':'';
+  return '<tr style="border-top:0.5px solid #1e293b">'
+    +'<td style="text-align:left;padding:4px 8px;font-size:11.5px;color:#e2e8f0;white-space:nowrap">'+(_REND_LAB[mk]||mk)+warn+'</td>'
+    +'<td style="text-align:left;padding:4px 8px;font-size:11px;color:#7dd3fc;white-space:nowrap">'+(_REND_LAB[c.opp]||c.opp)+'</td>'
+    +'<td style="text-align:center;padding:4px 6px;color:#94a3b8;font-size:11px">'+c.n+'</td>'
+    +'<td style="text-align:center;padding:4px 6px;font-size:11.5px">'+wr+'%</td>'
+    +'<td style="text-align:center;padding:4px 6px;font-weight:600;font-size:12.5px;color:'+(pos?'#22c55e':'#f87171')+'">'+(pos?'+':'')+roi+'%</td>'
+    +'<td style="text-align:center;padding:4px 6px;font-size:11.5px;color:'+(pos?'#86efac':'#fca5a5')+'">&euro;'+eur+'</td>'
+    +'</tr>';
+}
+function renderStoricoRend(list){
+  _rendList=list||[];
+  var host=document.getElementById('storico-rend'); if(!host) return;
+  var A=_rendAgg(_rendList);
+  var data=(_rendMode==='follow')?A.follow:A.fade;
+  var keys=Object.keys(data);
+  if(!keys.length){ host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;background:#0f172a;padding:10px 14px;font-size:12px;color:#64748b">&#x1F4C8; <b>Rendimento per mercato</b>: comparir&agrave; quando avrai partite flaggate con <b>risultato</b>.</div>'; return; }
+  var tot={n:0,w:0,ret:0}; keys.forEach(function(k){ tot.n+=data[k].n; tot.w+=data[k].w; tot.ret+=data[k].ret; });
+  var rows=keys.map(function(mk){ return { mk:mk, c:data[mk], roi:(data[mk].ret-data[mk].n)/data[mk].n }; }).sort(function(a,b){ return b.roi-a.roi; });
+  var body=rows.map(function(r){ return _rendRow(r.mk,r.c); }).join('');
+  var troi=Math.round((tot.ret-tot.n)/tot.n*1000)/10, twr=Math.round(tot.w/tot.n*100), teur=Math.round((100+(tot.ret-tot.n)*10)*10)/10, tpos=troi>=0;
+  var totRow='<tr style="border-top:1px solid #334155;background:#0b1324"><td style="text-align:left;padding:5px 8px;font-size:11.5px;font-weight:600;color:#e2e8f0">TOTALE</td><td style="padding:5px 8px;color:#64748b;font-size:10px">tutti i mercati</td><td style="text-align:center;padding:5px 6px;color:#94a3b8;font-size:11px">'+tot.n+'</td><td style="text-align:center;padding:5px 6px;font-size:11.5px">'+twr+'%</td><td style="text-align:center;padding:5px 6px;font-weight:700;font-size:12.5px;color:'+(tpos?'#22c55e':'#f87171')+'">'+(tpos?'+':'')+troi+'%</td><td style="text-align:center;padding:5px 6px;font-size:11.5px;color:'+(tpos?'#86efac':'#fca5a5')+'">&euro;'+teur+'</td></tr>';
+  var col2=(_rendMode==='follow')?'Segui':'Cosa punti (contro)';
+  var head='<tr style="color:#64748b;font-size:9.5px"><th style="text-align:left;padding:4px 8px">FLAG segnalato</th><th style="text-align:left;padding:4px 8px">'+col2+'</th><th style="padding:4px 6px">n</th><th style="padding:4px 6px">%vinte</th><th style="padding:4px 6px">ROI</th><th style="padding:4px 6px">&euro;100&rarr;</th></tr>';
+  var isF=_rendMode==='follow';
+  var noteTxt=isF
+    ? 'Modo <b style="color:#60a5fa">+ Seguo il flag</b>: punti il mercato segnalato cos&igrave; com&#39;&egrave;, alla sua quota. Qui rendono quasi solo <b>1 (Casa)</b> e <b>X</b>; seguire Under/BTTS/2 perde.'
+    : 'Modo <b style="color:#60a5fa">&minus; Vado contro</b>: punti il <b>contrario</b> del flag (Under&rarr;Over, BTTS No&rarr;S&igrave;, 1/2&rarr;doppia chance). Qui il forte &egrave; <b>2&rarr;1X</b> e gli <b>Under bassi&rarr;Over</b>; non fadeare la <b>Casa</b>.';
+  var bodyDisp=_rendOpen?'block':'none', chev=_rendOpen?'&#x25BC;':'&#x25B6;';
+  host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
+    +'<div onclick="toggleRend()" style="display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer">'
+      +'<span style="font-size:16px">&#x1F4C8;</span>'
+      +'<span style="font-size:14px;font-weight:600;color:#e2e8f0">Rendimento per mercato</span>'
+      +'<span style="font-size:11px;color:#64748b">segui (+) vs contro (&minus;)</span>'
+      +'<span id="rend-chev" style="margin-left:auto;color:#94a3b8">'+chev+'</span>'
+    +'</div>'
+    +'<div id="rend-body" style="display:'+bodyDisp+';padding:2px 14px 14px">'
+      +'<div style="margin-bottom:8px"><span style="display:inline-flex;border:1px solid #334155;border-radius:8px;overflow:hidden">'+_rendPill('fade','&minus; Vado contro',!isF)+_rendPill('follow','+ Seguo il flag',isF)+'</span></div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:420px"><thead>'+head+'</thead><tbody>'+body+totRow+'</tbody></table></div>'
+      +'<div style="font-size:11px;color:#64748b;margin-top:10px;line-height:1.6">'+noteTxt+' <b>&euro;100&rarr;</b> = se avessi puntato <b>solo</b> quel mercato, &euro;10 a fiche (illustrativo). <span style="color:#f59e0b">&#x26A0;</span> = meno di 5 casi. Ordinato per ROI. Rispetta il filtro Book.</div>'
+    +'</div>'
+  +'</div>';
+}
 async function loadStorico(){
   var el=document.getElementById('storico-list');
   el.innerHTML='<div style="color:#64748b;font-size:13px">Carico...</div>';
@@ -2426,6 +2497,7 @@ async function loadStorico(){
     renderStoricoFade(fl);
     renderStoricoEdge(fl);
     renderStoricoGolST(fl);
+    renderStoricoRend(fl);
     if(!_storAllList.length){ el.innerHTML='<div style="color:#64748b;font-size:13px">Nessuna partita salvata. Vai in <b>Analisi Live</b>, analizza una partita e premi <b>Salva</b>.</div>'; return; }
     renderStoricoCards(fl);
   }catch(e){ el.innerHTML='<div style="color:#f87171">Errore: '+e.message+'</div>'; }
