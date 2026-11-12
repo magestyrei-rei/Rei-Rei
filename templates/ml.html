@@ -2466,7 +2466,7 @@ function renderStoricoRend(list){
   var head='<tr style="color:#64748b;font-size:9.5px"><th style="text-align:left;padding:4px 8px">FLAG segnalato</th><th style="text-align:left;padding:4px 8px">'+col2+'</th><th style="padding:4px 6px">n</th><th style="padding:4px 6px">%vinte</th><th style="padding:4px 6px">ROI</th><th style="padding:4px 6px">&euro;100&rarr;</th></tr>';
   var isF=_rendMode==='follow';
   var noteTxt=isF
-    ? 'Modo <b style="color:#60a5fa">+ Seguo il flag</b>: punti il mercato segnalato cos&igrave; com&#39;&egrave;, alla sua quota. Qui rendono quasi solo <b>1 (Casa)</b> e <b>X</b>; seguire Under/BTTS/2 perde.'
+    ? 'Modo <b style="color:#60a5fa">+ Seguo il flag</b>: punti il mercato segnalato cos&igrave; com&#39;&egrave;, alla sua quota. In generale <b>seguire i flag perde</b> (totale in rosso): regge quasi solo la <b>Casa (1)</b>, mentre il <b>2 (Ospite)</b> &egrave; un disastro.'
     : 'Modo <b style="color:#60a5fa">&minus; Vado contro</b>: punti il <b>contrario</b> del flag (Under&rarr;Over, BTTS No&rarr;S&igrave;, 1/2&rarr;doppia chance). Qui il forte &egrave; <b>2&rarr;1X</b> e gli <b>Under bassi&rarr;Over</b>; non fadeare la <b>Casa</b>.';
   var bodyDisp=_rendOpen?'block':'none', chev=_rendOpen?'&#x25BC;':'&#x25B6;';
   host.innerHTML='<div style="border:0.5px solid #1e293b;border-radius:10px;overflow:hidden;background:#0f172a">'
